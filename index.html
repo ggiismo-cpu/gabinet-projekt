@@ -302,6 +302,14 @@
 <p style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">Uwaga: Pobranie z chmury nadpisuje lokalne dane. Prześlij do chmury = wrzuca lokalne dane do Supabase (zachowuje istniejące wpisy z chmury).</p>
 </div>
 
+<div class="cd"><div class="ct">🔍 Diagnostyka synchronizacji</div>
+<div id="syncDiag" class="mig-status" style="font:400 10px var(--fb)">Kliknij "Sprawdź", aby porównać dane lokalne z chmurą.</div>
+<div class="brow">
+  <button class="b b1 bsm" onclick="runSyncDiagnostics()">🔍 Sprawdź stan synchronizacji</button>
+</div>
+<p style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">Porównuje liczbę rekordów w pamięci urządzenia (IndexedDB) i w chmurze (Supabase). Przydatne żeby sprawdzić czy wizyty rzeczywiście trafiają do chmury.</p>
+</div>
+
 <div class="cd"><div class="ct">Bezpieczeństwo (opcjonalnie)</div>
 <div class="fr"><div class="fl"><label>Zmień PIN offline</label><input type="password" id="newPin" maxlength="6" inputmode="numeric" placeholder="4-6 cyfr"></div>
 <div class="fl"><label>Potwierdź PIN</label><input type="password" id="newPin2" maxlength="6" inputmode="numeric" placeholder="Powtórz"></div></div>
@@ -845,6 +853,75 @@ async function autoSyncPull(){
     }
   }catch(e){console.warn("autoSyncPull:",e);}
 }
+
+// Porównuje lokalny IndexedDB z Supabase — pokazuje różnice, ostrzega o brakach w chmurze.
+// Przydatne gdy user ma wątpliwości czy wizyty się zapisują w chmurze.
+async function runSyncDiagnostics(){
+  const el=document.getElementById("syncDiag");if(!el)return;
+  el.className="mig-status";el.innerHTML="⏳ Sprawdzanie...";
+  // Sprawdź czy w ogóle jesteśmy zalogowani w Supabase
+  if(!supa){el.className="mig-status err";el.innerHTML="❌ Supabase nie jest skonfigurowany (klient JS nie został utworzony).";return;}
+  if(!supaUser||!isOnline){
+    el.className="mig-status err";
+    el.innerHTML='❌ <strong>Nie jesteś zalogowany w chmurze.</strong> Wszystkie nowe wpisy idą tylko lokalnie. Wyloguj się i zaloguj ponownie w trybie Online.';
+    return;
+  }
+  try{
+    // Policz lokalne
+    const localCls=await dbGetAll("clients");
+    const localCons=await dbGetAll("consents");
+    const localAppts=await dbGetAll("appointments");
+    // Policz w chmurze (tylko count, bez pobierania wszystkich pól — szybciej)
+    const [cloudClsR,cloudConsR,cloudApptsR]=await Promise.all([
+      supa.from("clients").select("local_id",{count:"exact"}).eq("user_id",supaUser.id),
+      supa.from("consents").select("local_id",{count:"exact"}).eq("user_id",supaUser.id),
+      supa.from("appointments").select("local_id",{count:"exact"}).eq("user_id",supaUser.id)
+    ]);
+    // Sprawdź błędy połączenia per tabela
+    const errors=[cloudClsR.error,cloudConsR.error,cloudApptsR.error].filter(Boolean);
+    if(errors.length){
+      el.className="mig-status err";
+      el.innerHTML="❌ <strong>Błąd zapytania do Supabase:</strong><br>"+errors.map(e=>esc(e.message)).join("<br>")+'<br><br><span style="font:300 10px var(--fb)">Najczęstsze przyczyny:<br>• Schema.sql nie został wykonany w bazie (brak tabel)<br>• Polityki RLS nie są utworzone (brak uprawnień)<br>• Sesja wygasła — wyloguj się i zaloguj ponownie</span>';
+      return;
+    }
+    const cloudCls=cloudClsR.count||0;
+    const cloudCons=cloudConsR.count||0;
+    const cloudAppts=cloudApptsR.count||0;
+    // Oceń stan
+    const diffCls=localCls.length-cloudCls;
+    const diffCons=localCons.length-cloudCons;
+    const diffAppts=localAppts.length-cloudAppts;
+    const allInSync=diffCls===0&&diffCons===0&&diffAppts===0;
+    const onlyLocal=diffCls>0||diffCons>0||diffAppts>0;
+    const onlyCloud=diffCls<0||diffCons<0||diffAppts<0;
+    let statusClass="ok",statusIcon="✅",statusTxt="Wszystko zsynchronizowane";
+    if(!allInSync){
+      statusClass="warn";statusIcon="⚠️";
+      if(onlyLocal&&!onlyCloud)statusTxt="Lokalnie masz więcej niż w chmurze — brakujące wpisy nie zostały wysłane";
+      else if(onlyCloud&&!onlyLocal)statusTxt="W chmurze jest więcej niż lokalnie — pobierz dane z chmury";
+      else statusTxt="Rozbieżność w obie strony — użyj przesyłania/pobierania";
+    }
+    let h='<div style="font:600 12px var(--fb);margin-bottom:6px">'+statusIcon+' '+esc(statusTxt)+'</div>';
+    h+='<table style="width:100%;border-collapse:collapse;font:400 11px var(--fb)">';
+    h+='<thead><tr style="border-bottom:1px solid var(--bd)"><th style="text-align:left;padding:4px">Kategoria</th><th style="text-align:right;padding:4px">Lokalnie</th><th style="text-align:right;padding:4px">W chmurze</th><th style="text-align:right;padding:4px">Różnica</th></tr></thead><tbody>';
+    const rows=[["Klienci",localCls.length,cloudCls,diffCls],["Zgody",localCons.length,cloudCons,diffCons],["Wizyty/rezerwacje",localAppts.length,cloudAppts,diffAppts]];
+    rows.forEach(([lbl,l,c,d])=>{
+      const dStr=d===0?'<span style="color:var(--sc)">= 0</span>':d>0?'<span style="color:var(--wn)">+'+d+' lok.</span>':'<span style="color:var(--wn)">+'+(-d)+' chmura</span>';
+      h+='<tr style="border-bottom:1px dashed var(--bd)"><td style="padding:4px">'+lbl+'</td><td style="text-align:right;padding:4px">'+l+'</td><td style="text-align:right;padding:4px">'+c+'</td><td style="text-align:right;padding:4px">'+dStr+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">Email konta: <strong>'+esc(supaUser.email||"?")+'</strong><br>UUID: <code style="font-size:8px">'+esc(supaUser.id||"?")+'</code></div>';
+    if(!allInSync){
+      h+='<div style="margin-top:8px;padding:6px;background:var(--wb);border-radius:var(--rs);font:400 10px var(--fb)">💡 <strong>Co zrobić?</strong> Kliknij <strong>"Prześlij wszystko do chmury"</strong> powyżej, aby wysłać brakujące lokalne wpisy. Jeśli w chmurze jest więcej — "Pobierz z chmury".</div>';
+    }
+    el.className="mig-status "+(statusClass==="ok"?"ok":"warn");
+    el.innerHTML=h;
+  }catch(e){
+    console.error("Sync diagnostics error:",e);
+    el.className="mig-status err";
+    el.innerHTML="❌ Błąd diagnostyki: "+esc(e.message);
+  }
+}
 function autoBackup(){expJSON();}
 
 // ===== MODE SWITCH =====
@@ -1165,7 +1242,22 @@ function renderForm(){
   h+='<div class="cd"><div class="ct">Oświadczenie klienta</div><div class="sl">';
   ["Zostałam/em poinformowana/y o przeciwwskazaniach, technice, efektach i powikłaniach.","Udzieliłam/em prawdziwych informacji o stanie zdrowia.","Jestem zdrowa/y, nie pod wpływem alkoholu/środków odurzających.","Miałam/em czas na pytania i przeczytanie dokumentu.","Wyrażam świadomą zgodę na zabieg."].forEach(s=>{h+='<div class="si">'+s+'</div>';});
   h+='</div></div>';
-  h+='<div class="cd"><div class="ct">RODO <span class="rq">*</span></div><label class="cc"><input type="checkbox" id="chkR" data-rq><span>Wyrażam zgodę na przetwarzanie danych osobowych w celu wykonania zabiegu. Admin: Gabinet Magda Mączyńska. RODO (UE) 2016/679.</span></label></div>';
+  // RODO — obowiązkowa podstawa prawna zabiegu.
+  h+='<div class="cd"><div class="ct">RODO — dane osobowe <span class="rq">*</span></div>';
+  h+='<label class="cc"><input type="checkbox" id="chkR" data-rq><span><strong>Wyrażam zgodę</strong> na przetwarzanie moich danych osobowych w celu wykonania zabiegu i prowadzenia dokumentacji zabiegowej.<br><span style="font:300 9px var(--fb);color:var(--t2)">Administrator: Gabinet Magda Mączyńska, ul. Okrąg 46, 87-600 Lipno. Dane przechowywane zgodnie z RODO (UE) 2016/679 i UODO. Kontakt: kosmetolog.maczynska@gmail.com</span></span></label>';
+  h+='</div>';
+  // Marketing — DOBROWOLNY checkbox obok RODO (per zgoda, nie wymaga osobnego formularza zgoda_rodo)
+  h+='<div class="cd" style="background:var(--sb);border-left:3px solid var(--sc)"><div class="ct">📬 Zgoda marketingowa (dobrowolna)</div>';
+  h+='<label class="cc"><input type="checkbox" id="chkMk"><span><strong>Chcę otrzymywać komunikaty od Gabinetu Magda Mączyńska</strong>, w tym:<br>';
+  h+='<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">';
+  h+='• <strong>przypomnienia o nadchodzących wizytach</strong> (SMS/e-mail na 1 dzień przed)<br>';
+  h+='• <strong>informacje o zaleceniach pozabiegowych</strong> i pielęgnacji domowej<br>';
+  h+='• <strong>oferty i promocje</strong> na zabiegi które mogą Cię zainteresować (np. sezonowe, urodzinowe)<br>';
+  h+='• <strong>zaproszenia na nowe zabiegi i pokazy</strong> oraz informacje o dostępnych terminach';
+  h+='</span>';
+  h+='<span style="font:300 9px var(--fb);color:var(--t2);display:block;margin-top:6px">📨 Komunikaty otrzymasz na <strong>telefon (SMS)</strong> oraz <strong>e-mail</strong> podane powyżej. Zgoda dobrowolna — bez niej nadal możesz korzystać z usług, ale nie będziemy Cię informować o promocjach. Wycofanie zgody w każdej chwili: kosmetolog.maczynska@gmail.com lub SMS "STOP" na 503 672 015. Podstawa: art. 6 ust. 1 lit. a RODO + art. 172 Prawa Telekomunikacyjnego + art. 10 UŚUDE.</span>';
+  h+='</span></label>';
+  h+='</div>';
   h+='<div class="cd"><div class="ct">Wizerunek (opcja)</div><label class="cc"><input type="checkbox" id="chkWD"><span>Dokumentacja</span></label><label class="cc"><input type="checkbox" id="chkWS"><span>Szkolenia</span></label><label class="cc"><input type="checkbox" id="chkWM"><span>Marketing</span></label></div>';
   h+='<div class="cd"><div class="ct">Podpis klienta <span class="rq">*</span></div><div class="sw"><canvas id="sc1"></canvas><div class="sp" id="sp1">✍ Podpisz palcem lub penem</div></div><div class="brow"><button class="b b2 bsm" onclick="SP.c1&&SP.c1.clear()">Wyczyść</button></div></div>';
   h+='<div class="vmsg" id="vMsg"></div>';
@@ -1284,7 +1376,7 @@ function gatherData(){
   const checks={};document.querySelectorAll(".ci[data-val]").forEach(ci=>{checks[ci.querySelector(".cl")?.textContent||""]=ci.dataset.val;});
   const subtypes=[];document.querySelectorAll('input[name="subtype"]:checked').forEach(cb=>subtypes.push(cb.value));
   const extras={};document.querySelectorAll(".exF").forEach(ef=>{extras[ef.dataset.l]=ef.value;});
-  return{name:g("fN"),dob:g("fD"),pesel:g("fPe"),phone:g("fP"),email:g("fE"),address:g("fA"),date:new Date().toISOString().split("T")[0],checks,subtypes,extras,rodo:document.getElementById("chkR")?.checked,wizDok:document.getElementById("chkWD")?.checked,wizSzk:document.getElementById("chkWS")?.checked,wizMar:document.getElementById("chkWM")?.checked,sig1:SP.c1?.img(),treatmentId:cur?.id,treatmentName:cur?.name,duration:curMenu?.dur};
+  return{name:g("fN"),dob:g("fD"),pesel:g("fPe"),phone:g("fP"),email:g("fE"),address:g("fA"),date:new Date().toISOString().split("T")[0],checks,subtypes,extras,rodo:document.getElementById("chkR")?.checked,marketing:document.getElementById("chkMk")?.checked,wizDok:document.getElementById("chkWD")?.checked,wizSzk:document.getElementById("chkWS")?.checked,wizMar:document.getElementById("chkWM")?.checked,sig1:SP.c1?.img(),treatmentId:cur?.id,treatmentName:cur?.name,duration:curMenu?.dur};
 }
 
 async function autoPDF(label){
@@ -1305,7 +1397,7 @@ function dbPut(s,o){return new Promise(r=>{const tx=db.transaction(s,"readwrite"
 function dbAdd(s,o){return new Promise(r=>{const tx=db.transaction(s,"readwrite");const req=tx.objectStore(s).add(o);req.onsuccess=()=>r(req.result);});}
 function dbDel(s,id){return new Promise(r=>{const tx=db.transaction(s,"readwrite");tx.objectStore(s).delete(id);tx.oncomplete=()=>r();});}
 function clearStore(s){return new Promise(r=>{const tx=db.transaction(s,"readwrite");tx.objectStore(s).clear();tx.oncomplete=()=>r();});}
-function saveToDB(data){return new Promise(resolve=>{const tx=db.transaction(["clients","consents"],"readwrite");const cs=tx.objectStore("clients");cs.index("name").getAll(data.name).onsuccess=e=>{const ex=e.target.result;let cid,clientRec;if(ex.length){const c=ex[0];c.phone=data.phone||c.phone;c.email=data.email||c.email;c.address=data.address||c.address;c.dob=data.dob||c.dob;c.pesel=data.pesel||c.pesel;c.updatedAt=new Date().toISOString();cs.put(c);cid=c.id;clientRec=c;}else{const newC={name:data.name,phone:data.phone,email:data.email,address:data.address,dob:data.dob,pesel:data.pesel,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const a=cs.add(newC);a.onsuccess=()=>{cid=a.result;clientRec={id:cid,...newC};};}tx.oncomplete=()=>{const tx2=db.transaction("consents","readwrite");const conData={clientId:cid,treatmentId:data.treatmentId,treatmentName:data.treatmentName,duration:data.duration,date:data.date,checks:data.checks,subtypes:data.subtypes,extras:data.extras,rodo:data.rodo,wizDok:data.wizDok,wizSzk:data.wizSzk,wizMar:data.wizMar,sig1:data.sig1,legalStamp:data.legalStamp,createdAt:new Date().toISOString()};const a2=tx2.objectStore("consents").add(conData);a2.onsuccess=async()=>{const conId=a2.result;const conFull={...conData,id:conId};/* supabase sync w tle */if(clientRec)supaUpsert("clients",clientRec);supaUpsert("consents",conFull);resolve({cid:cid,conId:conId});};};};});}
+function saveToDB(data){return new Promise(resolve=>{const tx=db.transaction(["clients","consents"],"readwrite");const cs=tx.objectStore("clients");cs.index("name").getAll(data.name).onsuccess=e=>{const ex=e.target.result;let cid,clientRec;if(ex.length){const c=ex[0];c.phone=data.phone||c.phone;c.email=data.email||c.email;c.address=data.address||c.address;c.dob=data.dob||c.dob;c.pesel=data.pesel||c.pesel;c.updatedAt=new Date().toISOString();cs.put(c);cid=c.id;clientRec=c;}else{const newC={name:data.name,phone:data.phone,email:data.email,address:data.address,dob:data.dob,pesel:data.pesel,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const a=cs.add(newC);a.onsuccess=()=>{cid=a.result;clientRec={id:cid,...newC};};}tx.oncomplete=()=>{const tx2=db.transaction("consents","readwrite");const conData={clientId:cid,treatmentId:data.treatmentId,treatmentName:data.treatmentName,duration:data.duration,date:data.date,checks:data.checks,subtypes:data.subtypes,extras:data.extras,rodo:data.rodo,marketing:data.marketing||false,wizDok:data.wizDok,wizSzk:data.wizSzk,wizMar:data.wizMar,sig1:data.sig1,legalStamp:data.legalStamp,createdAt:new Date().toISOString()};const a2=tx2.objectStore("consents").add(conData);a2.onsuccess=async()=>{const conId=a2.result;const conFull={...conData,id:conId};/* supabase sync w tle */if(clientRec)supaUpsert("clients",clientRec);supaUpsert("consents",conFull);resolve({cid:cid,conId:conId});};};};});}
 
 // ===== CALENDAR (15-min) =====
 const HRS={1:[8,18],2:[8,18],3:[8,18],4:[8,18],5:[8,18],6:[9,15],0:null};
@@ -1323,7 +1415,7 @@ async function renderCal(){
     if(!consByClient[co.clientId])consByClient[co.clientId]={rodo:false,marketing:false,foto:false};
     const s=consByClient[co.clientId];
     if(co.rodo)s.rodo=true;
-    if(co.treatmentId==="zgoda_rodo")s.marketing=true;
+    if(co.treatmentId==="zgoda_rodo"||co.marketing)s.marketing=true;
     if(co.wizDok||co.wizSzk||co.wizMar)s.foto=true;
   });
   // Eksportuj do window — showApt użyje do wyświetlania badge'y w modal-u szczegółów
@@ -1433,7 +1525,7 @@ async function bookSlot(date,time){
 
   h+='<div class="fl" style="margin-bottom:6px"><label>Czas (min)</label><input type="number" id="bkDur" value="'+(preselTr?preselTr.dur:60)+'" step="15" min="15"></div>';
   h+='<div id="bkInfoPanel"></div>';
-  h+='<div class="brow"><button class="b bs" onclick="confirmBook(\''+date+'\',\''+time+'\')">✅ Rezerwuj</button><button class="b bw" onclick="confirmBookSMS(\''+date+'\',\''+time+'\')">📱 Rezerwuj + SMS</button><button class="b b1" onclick="confirmBookSMSFull(\''+date+'\',\''+time+'\')" title="SMS z potwierdzeniem + zalecenia przed zabiegiem">📋 Rezerwuj + SMS z zaleceniami</button><button class="b bo" onclick="openSeriesPlanner(\''+date+'\',\''+time+'\')" title="Zaplanuj całą serię powtarzalnych zabiegów">📆 Zaplanuj serię</button><button class="b b2" onclick="closeMo()">Anuluj</button></div>';
+  h+='<div class="brow"><button class="b bs" onclick="confirmBook(\''+date+'\',\''+time+'\')">✅ Rezerwuj</button><button class="b bw" onclick="confirmBookSMS(\''+date+'\',\''+time+'\')">📱 Rezerwuj + SMS</button><button class="b b1" onclick="confirmBookSMSFull(\''+date+'\',\''+time+'\')" title="SMS z potwierdzeniem + zalecenia przed zabiegiem">📋 Rezerwuj + SMS z zaleceniami</button><button class="b bo" onclick="switchBookToSeries(\''+date+'\',\''+time+'\')" title="Zaplanuj całą serię powtarzalnych zabiegów">📆 Zaplanuj serię</button><button class="b b2" onclick="closeMo()">Anuluj</button></div>';
   document.getElementById("modC").innerHTML=h;
   document.getElementById("modal").classList.add("on");
   prefBookTreat=null;
@@ -1968,7 +2060,7 @@ async function showDet(cid){
   cons.forEach(co=>{
     const d=co.date||co.createdAt?.substring(0,10)||"";
     if(co.rodo){consentStatus.rodo.has=true;consentStatus.rodo.count++;if(!consentStatus.rodo.date||d>consentStatus.rodo.date)consentStatus.rodo.date=d;}
-    if(co.treatmentId==="zgoda_rodo"){consentStatus.marketing.has=true;consentStatus.marketing.count++;if(!consentStatus.marketing.date||d>consentStatus.marketing.date)consentStatus.marketing.date=d;}
+    if(co.treatmentId==="zgoda_rodo"||co.marketing){consentStatus.marketing.has=true;consentStatus.marketing.count++;if(!consentStatus.marketing.date||d>consentStatus.marketing.date)consentStatus.marketing.date=d;}
     if(co.wizDok){consentStatus.foto_dok.has=true;consentStatus.foto_dok.count++;if(!consentStatus.foto_dok.date||d>consentStatus.foto_dok.date)consentStatus.foto_dok.date=d;}
     if(co.wizSzk){consentStatus.foto_szk.has=true;consentStatus.foto_szk.count++;if(!consentStatus.foto_szk.date||d>consentStatus.foto_szk.date)consentStatus.foto_szk.date=d;}
     if(co.wizMar){consentStatus.foto_mar.has=true;consentStatus.foto_mar.count++;if(!consentStatus.foto_mar.date||d>consentStatus.foto_mar.date)consentStatus.foto_mar.date=d;}
@@ -1997,7 +2089,7 @@ async function showDet(cid){
       const badges=[];
       if(co.rodo)badges.push('<span style="color:var(--sc);font:600 9px var(--fb)">RODO</span>');
       if(co.wizDok)badges.push('<span style="color:var(--g);font:600 9px var(--fb)">foto</span>');
-      if(co.treatmentId==="zgoda_rodo")badges.push('<span style="color:var(--wn);font:600 9px var(--fb)">marketing</span>');
+      if(co.treatmentId==="zgoda_rodo"||co.marketing)badges.push('<span style="color:var(--wn);font:600 9px var(--fb)">marketing</span>');
       h+='<div style="padding:6px 8px;border-bottom:1px solid var(--bd);display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
       h+='<div style="flex:1;min-width:120px"><div style="font:600 11px var(--fb)">'+esc(co.treatmentName||"(bez nazwy)")+'</div>';
       h+='<div style="font:300 9px var(--fb);color:var(--t2)">'+esc(co.date||"")+(badges.length?' · '+badges.join(" "):"")+'</div></div>';
@@ -2135,7 +2227,7 @@ async function viewConsent(conId){
   // Oświadczenia / zgody
   const flags=[];
   if(co.rodo)flags.push("✓ RODO — dane osobowe");
-  if(co.treatmentId==="zgoda_rodo")flags.push("✓ Marketing (SMS/e-mail)");
+  if(co.treatmentId==="zgoda_rodo"||co.marketing)flags.push("✓ Marketing (SMS/e-mail)");
   if(co.wizDok)flags.push("✓ Wizerunek — dokumentacja");
   if(co.wizSzk)flags.push("✓ Wizerunek — szkolenia");
   if(co.wizMar)flags.push("✓ Wizerunek — marketing");
@@ -2526,7 +2618,7 @@ async function proposeSeriesDates(startDate,startTime,intervalDays,count,durMin)
 
 // --- Otwiera kreator planera. Wywoływany z menu zabiegu lub z kalendarza. ---
 // `trIdx` = indeks w FM, `cid` (opcjonalnie) = preselekcja klienta
-async function openSeriesPlanner(trIdx,cid){
+async function openSeriesPlanner(trIdx,cid,startDateOverride,startTimeOverride){
   // trIdx może być null/undefined — wtedy user wybiera zabieg w modalu.
   // Jeśli podany, walidujemy: musi być istniejący indeks. Jeśli nie — zaczyna od "bez wyboru".
   let selectedTrIdx=(typeof trIdx==="number"&&trIdx>=0&&FM[trIdx])?trIdx:null;
@@ -2539,6 +2631,9 @@ async function openSeriesPlanner(trIdx,cid){
   const preselCl=cid?cls.find(c=>c.id===cid):null;
   const clLabel=preselCl?(preselCl.name+(preselCl.phone?" ("+preselCl.phone+")":"")):"";
   const today=new Date().toISOString().split("T")[0];
+  // Data i godzina startu — z argumentów (np. przełączenie z rezerwacji) lub domyślnie dziś/10:00
+  const startDate=(startDateOverride&&/^\d{4}-\d{2}-\d{2}$/.test(startDateOverride))?startDateOverride:today;
+  const startTime=(startTimeOverride&&/^\d{2}:\d{2}$/.test(startTimeOverride))?startTimeOverride:"10:00";
   _bkClients=cls;
 
   let h='<h3>📋 Zaplanuj serię zabiegów</h3>';
@@ -2566,9 +2661,9 @@ async function openSeriesPlanner(trIdx,cid){
   h+='<div class="ser-cfg"><div class="cfg-row">';
   h+='<div><label>Liczba zabiegów</label><input type="number" id="serCount" min="2" max="15" value="'+defCount+'"></div>';
   h+='<div><label>Odstęp (dni)</label><input type="number" id="serInt" min="1" max="180" value="'+defInt+'"></div>';
-  h+='<div><label>Start — data</label><input type="date" id="serStartDt" value="'+today+'" min="'+today+'"></div>';
+  h+='<div><label>Start — data</label><input type="date" id="serStartDt" value="'+startDate+'" min="'+today+'"></div>';
   h+='</div><div class="cfg-row">';
-  h+='<div><label>Start — godzina</label><input type="time" id="serStartT" value="10:00" step="900"></div>';
+  h+='<div><label>Start — godzina</label><input type="time" id="serStartT" value="'+startTime+'" step="900"></div>';
   h+='<div><label>Czas pojed. (min)</label><input type="number" id="serDur" value="'+(m?.dur||60)+'" step="15" min="15"></div>';
   h+='<div><label>&nbsp;</label><button class="b b1 bsm" onclick="recalcSeries()" style="width:100%;padding:7px">🔄 Przelicz terminy</button></div>';
   h+='</div></div>';
@@ -2870,6 +2965,19 @@ async function confirmSeries(withSMS){
 
 // Wejście do planera z menu zabiegów
 function planFromMenu(idx){openSeriesPlanner(idx,null);}
+
+// Przełączenie z modala rezerwacji pojedynczej do planera serii.
+// Odczytuje aktualnie wybrane pola klienta, zabiegu, czasu trwania — żeby user nie musiał wpisywać od nowa.
+function switchBookToSeries(date,time){
+  const cidVal=+(document.getElementById("bkCl")?.value||0);
+  const trVal=document.getElementById("bkTr")?.value;
+  const trIdx=(trVal===""||trVal==null)?null:+trVal;
+  // Nie wymagamy kompletu — planer zniesie brakujące pola, user je uzupełni
+  const cid=cidVal>0?cidVal:null;
+  // Zamknij modal rezerwacji i otwórz planer serii z przeniesionymi wartościami (+ datą/godziną)
+  closeMo();
+  setTimeout(()=>openSeriesPlanner(trIdx,cid,date,time),100);
+}
 
 // ======================================================================
 //  BLOK C: Masowe SMS promocyjne + szablony
