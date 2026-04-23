@@ -512,11 +512,26 @@ try{
     // Przywróć sesję jeśli istnieje
     supa.auth.getSession().then(({data,error})=>{
       if(error){console.error("[Supabase] getSession error:",error);return;}
-      if(data.session){console.log("[Supabase] Przywrócono sesję:",data.session.user.email);supaUser=data.session.user;isOnline=true;appMode="online";updateSyncBadge();updModeInfo();}
-      else{console.log("[Supabase] Brak aktywnej sesji — wymagane logowanie");}
+      if(data.session){
+        console.log("[Supabase] Przywrócono sesję:",data.session.user.email);
+        supaUser=data.session.user;isOnline=true;appMode="online";
+        localStorage.setItem("mm_mode","online");
+        updateSyncBadge();updModeInfo();
+        // FIX: Pokaż aplikację zamiast ekranu logowania — sesja jest żywa
+        enterAppFromSession();
+      }else{
+        console.log("[Supabase] Brak aktywnej sesji — wymagane logowanie");
+      }
     });
+    // Debounce: onAuthStateChange odpala się wielokrotnie przy focus/blur/SW reload.
+    // Logujemy tylko zmiany typu zdarzenia, nie każde wywołanie.
+    let _lastAuthEvent=null;
     supa.auth.onAuthStateChange((e,s)=>{
-      console.log("[Supabase] onAuthStateChange:",e,s?.user?.email||"(brak sesji)");
+      const email=s?.user?.email||"(brak sesji)";
+      const key=e+"|"+email;
+      if(key===_lastAuthEvent)return; // deduplicate
+      _lastAuthEvent=key;
+      console.log("[Supabase] onAuthStateChange:",e,email);
       supaUser=s?.user||null;
       isOnline=!!supaUser;appMode=isOnline?"online":(appMode==="online"?"offline":appMode);
       updateSyncBadge();updModeInfo();
@@ -526,6 +541,26 @@ try{
     else if(!SUPABASE_URL||SUPABASE_URL.includes("YOUR-PROJECT"))console.error("[Supabase] URL nie skonfigurowany");
   }
 }catch(e){console.error("[Supabase] init failed:",e);}
+
+// Wywoływane po przywróceniu sesji (user już zalogowany) — pokaż aplikację pomijając ekran logowania.
+// Chroni przed wyścigiem: DB może jeszcze nie być gotowa, więc czekamy w waitForDB.
+function enterAppFromSession(){
+  const login=document.getElementById("loginScr");
+  const app=document.getElementById("appWrap");
+  if(!login||!app)return; // DOM jeszcze nie gotowy — getSession zawoła to później
+  if(app.style.display==="block")return; // już wewnątrz, nic nie rób
+  login.style.display="none";
+  app.style.display="block";
+  // Uruchom bootstrap tak jak w supaSignIn
+  if(typeof waitForDB==="function"){
+    waitForDB(()=>{
+      if(typeof checkReminders==="function")checkReminders();
+      if(typeof updateSyncBadge==="function")updateSyncBadge();
+      if(typeof updModeInfo==="function")updModeInfo();
+      if(typeof autoSyncPull==="function")autoSyncPull();
+    });
+  }
+}
 
 function updateSyncBadge(){
   const b=document.getElementById("syncBadge");if(!b)return;
@@ -753,6 +788,13 @@ document.addEventListener("DOMContentLoaded",()=>{
   loadConfig();
   loadCustomTreatments();
   loadPriceOverrides();
+  // Jeśli getSession() rozwiązał się PRZED tym momentem (szybki cache), supaUser jest ustawiony —
+  // wtedy trzeba pokazać aplikację "rączkami", bo enterAppFromSession wywołany wcześniej
+  // nie znalazł jeszcze DOM-u.
+  if(supaUser){
+    console.log("[Boot] Wykryto aktywną sesję przy starcie DOM — pomijam ekran logowania");
+    enterAppFromSession();
+  }
   const s=document.getElementById("tSel");
   T.forEach(t=>{const o=document.createElement("option");o.value=t.id;o.textContent=t.name;s.appendChild(o);});
   s.addEventListener("change",renderForm);
