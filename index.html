@@ -538,6 +538,14 @@ try{
       supaUser=s?.user||null;
       isOnline=!!supaUser;appMode=isOnline?"online":(appMode==="online"?"offline":appMode);
       updateSyncBadge();updModeInfo();
+      // KRYTYCZNE: gdy user kliknie w link resetu hasła z maila, Supabase SDK sam
+      // przetworzy URL, ustawi sesję i wyemituje event PASSWORD_RECOVERY.
+      // Nasłuchujemy tu i pokazujemy formularz zmiany hasła ZAMIAST wpuszczać do aplikacji.
+      if(e==="PASSWORD_RECOVERY"){
+        console.log("[Supabase] Tryb RECOVERY — pokazuję formularz nowego hasła");
+        window._recoveryMode=true; // flaga żeby enterAppFromSession nie wchodził do aplikacji
+        showPasswordResetForm();
+      }
     });
   }else{
     if(!window.supabase)console.error("[Supabase] SDK nie załadowany (window.supabase undefined) — sprawdź internet");
@@ -547,10 +555,11 @@ try{
 
 // Wywoływane po przywróceniu sesji (user już zalogowany) — pokaż aplikację pomijając ekran logowania.
 // Chroni przed wyścigiem: DB może jeszcze nie być gotowa, więc czekamy w waitForDB.
-// WAŻNE: jeśli URL zawiera token recovery (#type=recovery), NIE wchodzimy do aplikacji —
+// WAŻNE: jeśli user jest w trybie resetu hasła (window._recoveryMode ustawione przez event
+// PASSWORD_RECOVERY LUB URL zawiera token recovery), NIE wchodzimy do aplikacji —
 // user musi najpierw ustawić nowe hasło przez formularz resetu.
 function enterAppFromSession(){
-  if((window.location.hash||"").includes("type=recovery")){
+  if(window._recoveryMode||(window.location.hash||"").includes("type=recovery")||(window.location.search||"").includes("type=recovery")){
     console.log("[Boot] Wykryto tryb recovery — pomijam auto-wejście do aplikacji");
     return;
   }
@@ -703,12 +712,18 @@ async function supaForgotPassword(){
 // Wywoływane przy starcie aplikacji. Szuka tokenu recovery w URL hash — jeśli jest, pokazuje formularz.
 function handlePasswordRecoveryFromURL(){
   if(!supa)return false;
-  // Link z maila ma format: https://app/#access_token=xxx&expires_in=3600&token_type=bearer&type=recovery&...
-  const hash=window.location.hash||"";
-  if(!hash.includes("type=recovery"))return false;
-  console.log("[Auth] Wykryto link resetu hasła w URL");
-  // Supabase SDK sam przetwarza hash i ustawia sesję. Pokazujemy formularz zmiany hasła.
-  showPasswordResetForm();
+  // Różne wersje Supabase / template'ów emaila mogą kłaść token w różnych miejscach:
+  //   - stare: #access_token=...&type=recovery
+  //   - nowe (PKCE): ?code=...
+  //   - template z verify endpoint: redirect przychodzi czysty po tym jak SDK przetworzy sesję,
+  //     wtedy event PASSWORD_RECOVERY idzie przez onAuthStateChange (patrz kod wyżej)
+  const hash=window.location.hash||"";const query=window.location.search||"";
+  const hasRecoveryInUrl=hash.includes("type=recovery")||query.includes("type=recovery");
+  if(!hasRecoveryInUrl)return false;
+  console.log("[Auth] Wykryto link resetu hasła w URL (hash/query)");
+  window._recoveryMode=true;
+  // Czekamy chwilę aż supa-js przetworzy URL i ustawi sesję, potem pokazujemy formularz.
+  setTimeout(showPasswordResetForm,300);
   return true;
 }
 
@@ -738,7 +753,8 @@ async function supaResetPassword(){
     if(error)throw error;
     console.log("[Auth] Hasło zmienione:",data.user?.email);
     // Wyczyść hash z URL, żeby przy następnym F5 się nie powtarzał
-    history.replaceState(null,"",window.location.pathname+window.location.search);
+    history.replaceState(null,"",window.location.pathname);
+    window._recoveryMode=false; // flaga wyczyszczona — teraz można wejść do aplikacji
     closeMo();
     toast("Hasło zmienione ✓ Loguję...");
     // updateUser utrzymuje sesję — można od razu wejść do aplikacji
@@ -756,11 +772,16 @@ async function supaResetPassword(){
   }
 }
 
-function cancelPasswordReset(){
-  // Wyczyść hash żeby formularz się nie pojawiał przy F5
-  history.replaceState(null,"",window.location.pathname+window.location.search);
+async function cancelPasswordReset(){
+  // Anulowanie resetu = wylogowanie (bo recovery-session dawałaby dostęp bez zmiany hasła)
+  history.replaceState(null,"",window.location.pathname);
+  window._recoveryMode=false;
+  if(supa){try{await supa.auth.signOut();}catch(_){}}
+  supaUser=null;isOnline=false;
   closeMo();
-  document.getElementById("loginScr").style.display="flex";
+  const login=document.getElementById("loginScr");if(login)login.style.display="flex";
+  const app=document.getElementById("appWrap");if(app)app.style.display="none";
+  toast("Anulowano reset hasła");
 }
 
 // ===== SUPABASE SYNC LAYER =====
@@ -2020,6 +2041,19 @@ function dl(c,n,t){const b=new Blob(["\ufeff"+c],{type:t});const u=URL.createObj
 // ======================================================================
 //  BLOK D: Planer serii zabiegowych
 // ======================================================================
+
+// Parsuje cenę z FM na liczbę — obsługuje "200", "200 zł", "od 150", "200-300" (bierze średnią),
+// "180-220 PLN", "1zł" itd. Zwraca null gdy nie da się — wtedy liczenie rabatu jest nieaktywne.
+function _priceToNumber(raw){
+  if(raw==null)return null;
+  const s=String(raw).toLowerCase().replace(/\s/g,"").replace(",",".");
+  // zakres "X-Y" → średnia
+  let m=s.match(/(\d+(?:\.\d+)?)[-–](\d+(?:\.\d+)?)/);
+  if(m){return (parseFloat(m[1])+parseFloat(m[2]))/2;}
+  // pojedyncza liczba (pomija tekst "od", "zł", "pln", "ok" etc)
+  m=s.match(/(\d+(?:\.\d+)?)/);
+  return m?parseFloat(m[1]):null;
+}
 // Parsuje pole m.repeat (np. "3-4 zabiegi co 2-4 tyg.", "co 21 dni, 4x",
 // "4-6 zabiegów co 7-12 dni", "8-10 zabiegów 1-2x/tyg.") na strukturę
 // {count: liczba powtorzen, intervalDays: odstep dni}. Obsluguje zakresy
@@ -2167,6 +2201,16 @@ async function openSeriesPlanner(trIdx,cid){
 
   h+='<div class="ct" style="margin-top:8px">Proponowane terminy</div>';
   h+='<div id="serList" class="ser-prop"></div>';
+  // Panel finansowy (rabat + zapłacono)
+  h+='<div class="ser-cfg" id="serPayPanel" style="background:var(--sb);border-color:var(--sc)">';
+  h+='<div class="ct" style="margin-bottom:6px">💰 Rozliczenie serii</div>';
+  h+='<div class="cfg-row">';
+  h+='<div><label>Cena 1 zabiegu (PLN)</label><input type="number" id="serUnitPrice" step="1" min="0" oninput="recalcSeriesPrice()" placeholder="np. 250"></div>';
+  h+='<div><label>Rabat za serię (%)</label><input type="number" id="serDiscount" value="5" step="1" min="0" max="99" oninput="recalcSeriesPrice()"></div>';
+  h+='<div><label>Zapłacono z góry</label><div style="padding:6px 0;display:flex;align-items:center;gap:6px"><input type="checkbox" id="serPaid" style="width:18px;height:18px"><span style="font:400 11px var(--fb);color:var(--t2)">cała seria opłacona</span></div></div>';
+  h+='</div>';
+  h+='<div id="serPriceCalc" style="background:var(--c);border-radius:var(--rs);padding:8px;margin-top:6px;font:400 11px var(--fb)"></div>';
+  h+='</div>';
   h+='<div id="serSummary" class="ser-summary" style="display:none"></div>';
 
   h+='<div class="brow" style="margin-top:10px">';
@@ -2181,10 +2225,45 @@ async function openSeriesPlanner(trIdx,cid){
   window._serTrtIdx=selectedTrIdx;
   window._serSlots=[];
 
-  // Tylko jeśli mamy zabieg — wyliczmy od razu terminy
-  if(selectedTrIdx!=null)setTimeout(recalcSeries,150);
+  // Tylko jeśli mamy zabieg — wyliczmy od razu terminy + ustaw cenę jednostkową
+  if(selectedTrIdx!=null){
+    setTimeout(()=>{
+      const u=document.getElementById("serUnitPrice");
+      if(u&&m){const p=_priceToNumber(m.price);if(p!=null)u.value=p;}
+      recalcSeries();
+      recalcSeriesPrice();
+    },150);
+  }else{
+    setTimeout(recalcSeriesPrice,200);
+  }
 
   setTimeout(()=>document.addEventListener("click",serOutsideClick,true),100);
+}
+
+// Liczy cenę serii na żywo — wywoływane z oninput="recalcSeriesPrice()" na polach cena/rabat
+// oraz po każdym "Przelicz terminy" (bo liczba slotów się zmienia).
+function recalcSeriesPrice(){
+  const calcEl=document.getElementById("serPriceCalc");if(!calcEl)return;
+  const unitP=parseFloat(document.getElementById("serUnitPrice")?.value);
+  const discPct=parseFloat(document.getElementById("serDiscount")?.value)||0;
+  const slots=window._serSlots||[];
+  const validSlots=slots.filter(s=>!s.conflict);
+  const count=validSlots.length;
+  if(!unitP||unitP<=0||count===0){
+    calcEl.innerHTML='<span style="color:var(--t2)">Podaj cenę 1 zabiegu i przelicz terminy, aby zobaczyć kalkulację.</span>';
+    return;
+  }
+  const baseTotal=unitP*count;
+  const discAmt=baseTotal*(discPct/100);
+  const finalTotal=baseTotal-discAmt;
+  const perSession=finalTotal/count;
+  let h='<div style="display:flex;justify-content:space-between"><span>Cena bazowa ('+count+' × '+unitP.toFixed(0)+' zł):</span><strong>'+baseTotal.toFixed(0)+' zł</strong></div>';
+  if(discPct>0){
+    h+='<div style="display:flex;justify-content:space-between;color:var(--g)"><span>Rabat serii ('+discPct+'%):</span><strong>− '+discAmt.toFixed(0)+' zł</strong></div>';
+  }
+  h+='<div style="display:flex;justify-content:space-between;border-top:1px solid var(--bd);padding-top:4px;margin-top:4px;font-size:13px"><span><strong>Do zapłaty:</strong></span><strong style="color:var(--g)">'+finalTotal.toFixed(0)+' zł</strong></div>';
+  h+='<div style="display:flex;justify-content:space-between;font:300 10px var(--fb);color:var(--t2)"><span>za pojedynczy zabieg:</span><span>'+perSession.toFixed(0)+' zł</span></div>';
+  calcEl.innerHTML=h;
 }
 
 // Wyszukiwanie zabiegu w planerze (nowa funkcja analogiczna do filterBkTrList)
@@ -2318,6 +2397,8 @@ function renderSerList(){
     if(first&&last)txt+=" · od "+first.date+" do "+last.date;
     sum.textContent=txt;sum.style.display="block";
   }else{sum.style.display="none";}
+  // Odśwież kalkulację finansową — liczba prawidłowych slotów mogła się zmienić
+  if(typeof recalcSeriesPrice==="function")recalcSeriesPrice();
 }
 
 async function editSerSlot(i,newDate,newTime){
@@ -2356,10 +2437,36 @@ async function confirmSeries(withSMS){
   if(!validSlots.length){toast("Brak wolnych terminów do zapisania");return;}
   const durMin=+document.getElementById("serDur").value||m.dur||60;
 
+  // Wyliczenie cen z rabatu (przed zapisem — żeby trafiło do każdej wizyty)
+  const unitP=parseFloat(document.getElementById("serUnitPrice")?.value);
+  const discPct=parseFloat(document.getElementById("serDiscount")?.value)||0;
+  const paidFlag=document.getElementById("serPaid")?.checked||false;
+  const count=validSlots.length;
+  let pricePerSession="",totalFinal=null;
+  if(unitP>0&&count>0){
+    const baseTotal=unitP*count;
+    const finalTotal=baseTotal*(1-discPct/100);
+    totalFinal=finalTotal;
+    pricePerSession=(finalTotal/count).toFixed(2);
+  }else{
+    // Gdy user nie podał ceny, trzymamy tekstową cenę z FM (np. "od 150")
+    pricePerSession=m.price||"";
+  }
+
   // Zapisz każdy slot jako osobny wpis appointments
   const savedDates=[];
+  const seriesId="ser_"+Date.now()+"_"+Math.random().toString(36).slice(2,8);
   for(const s of validSlots){
-    const data={clientId:cid,date:s.date,time:s.time,treatment:m.name,price:m.price||"",duration:durMin,series:true,createdAt:new Date().toISOString()};
+    const data={
+      clientId:cid,date:s.date,time:s.time,treatment:m.name,
+      price:pricePerSession,
+      duration:durMin,
+      series:true,
+      seriesId,           // wspólny identyfikator serii — przyda się w przyszłości (odwoływanie, raporty)
+      seriesDiscount:discPct||0,
+      paid:paidFlag,
+      createdAt:new Date().toISOString()
+    };
     const aptId=await dbAdd("appointments",data);
     supaUpsert("appointments",{id:aptId,...data});
     savedDates.push(s.date+" "+s.time);
@@ -2373,13 +2480,18 @@ async function confirmSeries(withSMS){
       const imie=(cl.name||"").split(" ")[0]||"Pani";
       let txt="Dzien dobry "+imie+", potwierdzamy plan serii zabiegowej ("+m.name+", "+validSlots.length+" zabiegow):\n";
       validSlots.forEach((s,i)=>{txt+=(i+1)+". "+s.date+" g. "+s.time+"\n";});
+      if(totalFinal!=null){
+        txt+="\nKoszt calej serii: "+totalFinal.toFixed(0)+" zl";
+        if(discPct>0)txt+=" (rabat "+discPct+"%)";
+        txt+=paidFlag?" - oplacone.\n":" - platnosc w gabinecie.\n";
+      }
       txt+="Prosimy o potwierdzenie obecnosci SMS-em. Gabinet Magda Maczynska, 503672015.";
       if(txt.length>=1200)txt=txt.substring(0,1180)+"...";
       window.open("sms:"+cl.phone+"?body="+encodeURIComponent(txt));
     }
   }
   closeMo();renderCal();
-  toast("Zarezerwowano serię: "+validSlots.length+" terminów ✓");
+  toast("Zarezerwowano serię: "+validSlots.length+" terminów"+(totalFinal!=null?" · "+totalFinal.toFixed(0)+" zł":"")+" ✓");
 }
 
 // Wejście do planera z menu zabiegów
@@ -2412,8 +2524,61 @@ const PROMO_TPL={
   "FOTODYNAMIKA":"Dzien dobry {name}! Zapraszamy na fotodynamike LED — bez rekonwalescencji, widoczny efekt. Gabinet Magda Maczynska, 503672015.",
   "OGOLNY":"Dzien dobry {name}! W naszym gabinecie czeka promocja specjalnie dla Ciebie. Zadzwon po szczegoly: 503672015. Gabinet Magda Maczynska.",
   "POWROT":"Dzien dobry {name}! Dawno Cie u nas nie bylo — tesknimy! Mamy promocje dla powracajacych klientek. Zadzwon: 503672015. Gabinet Magda Maczynska.",
-  "URODZINY":"Dzien dobry {name}! Z okazji urodzin mamy dla Ciebie rabat 15% na dowolny zabieg. Waznosc 30 dni. Gabinet Magda Maczynska, 503672015."
+  "URODZINY":"Dzien dobry {name}! Z okazji urodzin mamy dla Ciebie rabat 15% na dowolny zabieg. Waznosc 30 dni. Gabinet Magda Maczynska, 503672015.",
+
+  // === OKAZJE I ŚWIĘTA (rok kalendarzowy PL) ===
+  "NOWY_ROK":"Szczesliwego Nowego Roku, {name}! Z tej okazji -15% na wybrane zabiegi w styczniu. Zacznij rok w pieknej formie! Gabinet Magda Maczynska, 503672015.",
+  "WALENTYNKI":"Dzien dobry {name}! Walentynki tuz tuz — zadbaj o siebie lub obdaruj bliska osobe voucherem na zabieg. Gabinet Magda Maczynska, 503672015.",
+  "DZIEN_KOBIET":"Dzien dobry {name}! Z okazji Dnia Kobiet specjalna promocja -20% na dowolny zabieg. Waznosc do konca marca. Gabinet Magda Maczynska, 503672015.",
+  "WIOSNA":"Dzien dobry {name}! Wiosna to czas odnowy. Zapraszamy na rozjasniajace peelingi, mezoterapie i zabiegi nawilzajace po zimie. Gabinet Magda Maczynska, 503672015.",
+  "WIELKANOC":"Wesolych Swiat Wielkanocnych, {name}! Zapraszamy na swiateczne zabiegi urodowe — zadbaj o sobie przed swietami. Gabinet Magda Maczynska, 503672015.",
+  "MAJOWKA":"Dzien dobry {name}! Majowka za rogiem — czas na swietnie wygladac! Promocja na zabiegi na twarz i cialo. Gabinet Magda Maczynska, 503672015.",
+  "DZIEN_MATKI":"Dzien dobry {name}! Dzien Matki to okazja do podarowania prezentu bliskiej osobie — voucher na dowolny zabieg. Gabinet Magda Maczynska, 503672015.",
+  "LATO":"Dzien dobry {name}! Lato zbliza sie wielkimi krokami. Zapraszamy na depilacje laserowa, przygotowanie skory i opalania. Gabinet Magda Maczynska, 503672015.",
+  "WAKACJE":"Dzien dobry {name}! Jedziesz na wakacje? Zapraszamy na szybki makijaz permanentny, laminacje rzes i przedwyjazdowa pielegnacje. Gabinet Magda Maczynska, 503672015.",
+  "POWROT_WAKACJI":"Dzien dobry {name}! Wrociles z wakacji? Skora po sloncu potrzebuje regeneracji — zapraszamy na nawilzanie, peelingi i osocze. Gabinet Magda Maczynska, 503672015.",
+  "JESIEN":"Dzien dobry {name}! Jesien to idealny czas na zabiegi laserowe, peelingi medyczne i kuracje intensywne. Gabinet Magda Maczynska, 503672015.",
+  "ANDRZEJKI":"Dzien dobry {name}! Andrzejki i sezon imprez — przygotuj sie na eleganckie wieczory. Zapraszamy na zabiegi i stylizacje. Gabinet Magda Maczynska, 503672015.",
+  "MIKOLAJ":"Dzien dobry {name}! Czekolada pod choinke dla siebie? Voucher na zabieg to idealny prezent — i dla Ciebie, i od Ciebie. Gabinet Magda Maczynska, 503672015.",
+  "BOZE_NARODZENIE":"Wesolych Swiat, {name}! Dziekujemy za caly rok zaufania. Specjalna swiateczna promocja na zabiegi przed sylwestrem. Gabinet Magda Maczynska, 503672015.",
+  "SYLWESTER":"Dzien dobry {name}! Szykujesz sie na Sylwestra? Zapraszamy na ekspresowe zabiegi rozswietlajace i makijaz. Gabinet Magda Maczynska, 503672015.",
+  "KONIEC_ROKU":"Dzien dobry {name}! Koniec roku — nie zapomnij wykorzystac niezrealizowanych voucherow i pakietow. Termin waznosci zblizaja sie. Gabinet Magda Maczynska, 503672015.",
+  "NOWY_ZABIEG":"Dzien dobry {name}! Mamy cos nowego w ofercie — {trt}. Promocja otwarcia tylko do konca miesiaca. Zadzwon po szczegoly: 503672015. Gabinet Magda Maczynska.",
+  "CZARNY_PIATEK":"Dzien dobry {name}! Black Friday w Gabinecie — rabaty do 30% na pakiety i vouchery. Tylko w ten piatek. Gabinet Magda Maczynska, 503672015.",
+  "POKAZ":"Dzien dobry {name}! Zapraszamy na pokaz nowego zabiegu — prezentacja + mozliwosc zapisow po promocyjnej cenie. Szczegoly: 503672015. Gabinet Magda Maczynska.",
+  "PAKIET":"Dzien dobry {name}! Specjalna oferta pakietowa — kup 5 zabiegow w cenie 4. Idealny start przed {trt}. Gabinet Magda Maczynska, 503672015."
 };
+
+// Sugerowana kategoria okazji na podstawie aktualnej daty.
+// Zwraca klucz z PROMO_TPL, którym warto otworzyć listę.
+function suggestedOccasion(){
+  const d=new Date();const m=d.getMonth()+1;const day=d.getDate();
+  // Stałe święta — daty orientacyjne, 10 dni przed/po. Kolejność ma znaczenie (pierwszy match wygrywa).
+  if(m===12&&day>=28)return "SYLWESTER";
+  if((m===12&&day>=20)||(m===1&&day<=2))return "BOZE_NARODZENIE";
+  if(m===12)return "MIKOLAJ";
+  if(m===11&&day>=24&&day<=30)return "CZARNY_PIATEK";
+  if(m===11&&day>=20)return "ANDRZEJKI";
+  if(m===11)return "JESIEN";
+  if(m===10)return "JESIEN";
+  if(m===9&&day>=15)return "POWROT_WAKACJI";
+  if(m===9)return "JESIEN";
+  if((m===7)||(m===8&&day<=15))return "WAKACJE";
+  if(m===8)return "POWROT_WAKACJI";
+  if(m===6||m===5&&day>=25)return "LATO";
+  if(m===5&&day>=20&&day<=26)return "DZIEN_MATKI";
+  if(m===5&&day<=3)return "MAJOWKA";
+  if(m===5)return "LATO";
+  if(m===4&&day>=15)return "WIOSNA";
+  if(m===4)return "WIELKANOC";
+  if(m===3&&day>=20)return "WIOSNA";
+  if(m===3&&day>=5&&day<=11)return "DZIEN_KOBIET";
+  if(m===3)return "WIOSNA";
+  if(m===2&&day>=10&&day<=16)return "WALENTYNKI";
+  if(m===2)return "WALENTYNKI";
+  if(m===1&&day<=14)return "NOWY_ROK";
+  return null;
+}
 
 function openMassSMS(){
   if(_selected.size===0){toast("Zaznacz klientów");return;}
@@ -2431,8 +2596,19 @@ function openMassSMS(){
 
   let h='<h3>📱 Masowy SMS — '+_selected.size+' klient(ów)</h3>';
   h+='<div class="db">Wybierz szablon (lub napisz własny tekst). {name} zostanie zastąpione imieniem klienta, {trt} — nazwą zabiegu.</div>';
+  // Podpowiedź sezonowa
+  const occ=suggestedOccasion();
+  const OCC_LABELS={NOWY_ROK:"🎊 Nowy Rok",WALENTYNKI:"💘 Walentynki",DZIEN_KOBIET:"🌷 Dzień Kobiet",WIOSNA:"🌸 Wiosna",WIELKANOC:"🐣 Wielkanoc",MAJOWKA:"🌿 Majówka",DZIEN_MATKI:"💐 Dzień Matki",LATO:"☀️ Lato",WAKACJE:"🏖 Wakacje",POWROT_WAKACJI:"🌞 Powrót z wakacji",JESIEN:"🍂 Jesień",ANDRZEJKI:"🔮 Andrzejki",MIKOLAJ:"🎅 Mikołaj",BOZE_NARODZENIE:"🎄 Boże Narodzenie",SYLWESTER:"🎆 Sylwester",KONIEC_ROKU:"📅 Koniec roku",CZARNY_PIATEK:"🛍 Czarny Piątek",NOWY_ZABIEG:"✨ Nowy zabieg",POKAZ:"👁 Pokaz",PAKIET:"📦 Pakiet"};
+  if(occ){
+    h+='<div class="db" style="border-left-color:var(--sc);background:var(--sb)"><strong>📆 Sezonowa sugestia:</strong> '+esc(OCC_LABELS[occ]||occ)+' — kliknij szablon niżej, aby użyć.</div>';
+  }
+  // Okazje + święta w osobnej grupie
+  const occKeys=Object.keys(OCC_LABELS);
+  let occOpts='<optgroup label="📅 Okazje i święta">';
+  occKeys.forEach(k=>{occOpts+='<option value="CAT:'+esc(k)+'"'+(k===occ?" selected":"")+'>'+esc(OCC_LABELS[k])+'</option>';});
+  occOpts+='</optgroup>';
   h+='<div class="fl"><label>Szablon</label><select id="mssTpl" onchange="applyMSSTpl()">'+
-     '<option value="">— wybierz —</option>'+trtOpts+
+     '<option value="">— wybierz —</option>'+occOpts+trtOpts+
      '<option value="SPECIAL:POWROT">💔 Klientki, które dawno nie były (powrót)</option>'+
      '<option value="SPECIAL:URODZINY">🎂 Urodziny (rabat -15%)</option>'+
      '<option value="SPECIAL:OGOLNY">✨ Ogólna promocja</option>'+
@@ -2456,6 +2632,8 @@ function openMassSMS(){
   h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">ℹ️ Otworzy kolejno aplikacje SMS dla każdego klienta (odstęp 1,5 s). Potwierdź wysłanie w każdym oknie.</div>';
   document.getElementById("modC").innerHTML=h;
   document.getElementById("modal").classList.add("on");
+  // Jeśli sezonowa sugestia jest ustawiona w select — zastosuj od razu treść
+  if(occ)setTimeout(applyMSSTpl,80);
 }
 
 function applyMSSTpl(){
