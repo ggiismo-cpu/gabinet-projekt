@@ -10,7 +10,7 @@
 "use strict";
 
 // BUMPUJ WERSJĘ przy każdej zmianie app-shell żeby wymusić odświeżenie cache
-const CACHE_VERSION = "v1.0.5";
+const CACHE_VERSION = "v1.0.6";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
