@@ -181,7 +181,10 @@
     <button class="b b1" onclick="supaSignIn()">Zaloguj</button>
     <button class="b b2" onclick="supaSignUp()">Zarejestruj</button>
   </div>
-  <p style="font:300 9px var(--fb);color:var(--t2);margin-top:8px;text-align:center">Pierwsze logowanie: użyj "Zarejestruj", potem "Zaloguj"</p>
+  <p style="font:300 9px var(--fb);color:var(--t2);margin-top:8px;text-align:center">
+    Pierwsze logowanie: użyj "Zarejestruj", potem "Zaloguj".<br>
+    <a href="#" onclick="event.preventDefault();supaForgotPassword()" style="color:var(--g);font-weight:600;cursor:pointer">🔑 Zapomniałem hasła</a>
+  </p>
 </div>
 
 <div class="pin-toggle" onclick="togglePinLogin()">🔒 Włącz PIN dla trybu offline (opcjonalnie)</div>
@@ -544,7 +547,13 @@ try{
 
 // Wywoływane po przywróceniu sesji (user już zalogowany) — pokaż aplikację pomijając ekran logowania.
 // Chroni przed wyścigiem: DB może jeszcze nie być gotowa, więc czekamy w waitForDB.
+// WAŻNE: jeśli URL zawiera token recovery (#type=recovery), NIE wchodzimy do aplikacji —
+// user musi najpierw ustawić nowe hasło przez formularz resetu.
 function enterAppFromSession(){
+  if((window.location.hash||"").includes("type=recovery")){
+    console.log("[Boot] Wykryto tryb recovery — pomijam auto-wejście do aplikacji");
+    return;
+  }
   const login=document.getElementById("loginScr");
   const app=document.getElementById("appWrap");
   if(!login||!app)return; // DOM jeszcze nie gotowy — getSession zawoła to później
@@ -657,6 +666,102 @@ async function supaSignUp(){
   }
 }
 async function supaSignOut(){if(supa){await supa.auth.signOut();supaUser=null;isOnline=false;appMode="offline";localStorage.setItem("mm_mode","offline");updateSyncBadge();updModeInfo();toast("Wylogowano");}}
+
+// ===== PASSWORD RECOVERY =====
+// Flow:
+//   1) User klika "Zapomniałem hasła" → supaForgotPassword() wysyła mail z linkiem resetu
+//   2) User klika link w mailu → wraca do aplikacji z tokenem w URL (#access_token=...&type=recovery)
+//   3) handlePasswordRecoveryFromURL() wykrywa token przy starcie i pokazuje formularz nowego hasła
+//   4) User wpisuje nowe hasło → supaResetPassword() wywołuje supa.auth.updateUser({password})
+
+async function supaForgotPassword(){
+  if(!supa){toast("Supabase nie skonfigurowany");return;}
+  const em=(document.getElementById("supaEmail")?.value||"").trim();
+  if(!em||!validateEmail(em)){toast("Wpisz najpierw e-mail powyżej");document.getElementById("supaEmail")?.focus();return;}
+  console.log("[Auth] Reset hasła dla:",em);
+  try{
+    // redirectTo: wracamy pod obecny URL — wtedy handlePasswordRecoveryFromURL zobaczy token w hashu
+    const redirectTo=window.location.origin+window.location.pathname;
+    const{data,error}=await supa.auth.resetPasswordForEmail(em,{redirectTo});
+    if(error)throw error;
+    console.log("[Auth] Reset link wysłany:",data);
+    document.getElementById("modC").innerHTML='<h3>📧 Link resetujący wysłany</h3>'+
+      '<div class="db" style="border-left-color:var(--sc)">Sprawdź skrzynkę <strong>'+esc(em)+'</strong> — otrzymasz mail z Supabase z linkiem do ustawienia nowego hasła.</div>'+
+      '<div class="db">Po kliknięciu linku wrócisz tutaj i zobaczysz formularz nowego hasła.</div>'+
+      '<div style="font:300 10px var(--fb);color:var(--t2);margin-top:8px"><strong>Jeśli mail nie przyszedł w 5 min:</strong><br>• Sprawdź folder Spam<br>• Sprawdź czy w panelu Supabase (Authentication → URL Configuration) dodano <code>'+esc(redirectTo)+'</code> do "Redirect URLs"<br>• W panelu Authentication → Email Templates można też zmienić szablon maila</div>'+
+      '<div class="brow"><button class="b bs" onclick="closeMo()">OK</button></div>';
+    document.getElementById("modal").classList.add("on");
+  }catch(e){
+    console.error("[Auth] resetPassword error:",e);
+    document.getElementById("modC").innerHTML='<h3>❌ Błąd resetu hasła</h3>'+
+      '<div class="db" style="border-left-color:var(--dn)"><strong>Komunikat:</strong> '+esc(e.message||"brak")+'</div>'+
+      '<div class="brow"><button class="b b2" onclick="closeMo()">OK</button></div>';
+    document.getElementById("modal").classList.add("on");
+  }
+}
+
+// Wywoływane przy starcie aplikacji. Szuka tokenu recovery w URL hash — jeśli jest, pokazuje formularz.
+function handlePasswordRecoveryFromURL(){
+  if(!supa)return false;
+  // Link z maila ma format: https://app/#access_token=xxx&expires_in=3600&token_type=bearer&type=recovery&...
+  const hash=window.location.hash||"";
+  if(!hash.includes("type=recovery"))return false;
+  console.log("[Auth] Wykryto link resetu hasła w URL");
+  // Supabase SDK sam przetwarza hash i ustawia sesję. Pokazujemy formularz zmiany hasła.
+  showPasswordResetForm();
+  return true;
+}
+
+function showPasswordResetForm(){
+  // Ukryj ekran logowania i aplikację — pokażemy osobny modal
+  const login=document.getElementById("loginScr");if(login)login.style.display="none";
+  const app=document.getElementById("appWrap");if(app)app.style.display="none";
+  // Pokaż modal
+  document.getElementById("modC").innerHTML='<h3>🔑 Ustaw nowe hasło</h3>'+
+    '<div class="db">Twoja sesja została tymczasowo aktywowana na czas resetu. Wpisz nowe hasło.</div>'+
+    '<div class="fl"><label>Nowe hasło (min. 6 znaków)</label><input type="password" id="newPwInput" autocomplete="new-password" placeholder="••••••"></div>'+
+    '<div class="fl"><label>Potwierdź hasło</label><input type="password" id="newPwInput2" autocomplete="new-password" placeholder="••••••"></div>'+
+    '<div class="brow"><button class="b bs" onclick="supaResetPassword()">💾 Zapisz nowe hasło</button><button class="b b2" onclick="cancelPasswordReset()">Anuluj</button></div>';
+  document.getElementById("modal").classList.add("on");
+  // Fokus na pole hasła
+  setTimeout(()=>document.getElementById("newPwInput")?.focus(),100);
+}
+
+async function supaResetPassword(){
+  const pw1=document.getElementById("newPwInput")?.value||"";
+  const pw2=document.getElementById("newPwInput2")?.value||"";
+  if(pw1.length<6){toast("Hasło min. 6 znaków");return;}
+  if(pw1!==pw2){toast("Hasła się różnią");return;}
+  try{
+    console.log("[Auth] Ustawiam nowe hasło");
+    const{data,error}=await supa.auth.updateUser({password:pw1});
+    if(error)throw error;
+    console.log("[Auth] Hasło zmienione:",data.user?.email);
+    // Wyczyść hash z URL, żeby przy następnym F5 się nie powtarzał
+    history.replaceState(null,"",window.location.pathname+window.location.search);
+    closeMo();
+    toast("Hasło zmienione ✓ Loguję...");
+    // updateUser utrzymuje sesję — można od razu wejść do aplikacji
+    supaUser=data.user;isOnline=true;appMode="online";
+    localStorage.setItem("mm_mode","online");
+    enterAppFromSession();
+  }catch(e){
+    console.error("[Auth] reset password error:",e);
+    toast("Błąd: "+(e.message||"nieznany"));
+    document.getElementById("modC").innerHTML='<h3>❌ Nie udało się zmienić hasła</h3>'+
+      '<div class="db" style="border-left-color:var(--dn)"><strong>Komunikat:</strong> '+esc(e.message||"brak")+'</div>'+
+      '<div style="font:300 10px var(--fb);color:var(--t2);margin-top:8px">Możliwe przyczyny:<br>• Link wygasł (żywotność: 1 godzina od wysłania maila)<br>• Sesja resetu nieprawidłowa — wyślij nowy link</div>'+
+      '<div class="brow"><button class="b b2" onclick="cancelPasswordReset()">Wróć do logowania</button></div>';
+    document.getElementById("modal").classList.add("on");
+  }
+}
+
+function cancelPasswordReset(){
+  // Wyczyść hash żeby formularz się nie pojawiał przy F5
+  history.replaceState(null,"",window.location.pathname+window.location.search);
+  closeMo();
+  document.getElementById("loginScr").style.display="flex";
+}
 
 // ===== SUPABASE SYNC LAYER =====
 async function supaUpsert(table,rec){
@@ -795,6 +900,13 @@ document.addEventListener("DOMContentLoaded",()=>{
     console.log("[Boot] Wykryto aktywną sesję przy starcie DOM — pomijam ekran logowania");
     enterAppFromSession();
   }
+  // Sprawdź czy URL zawiera token resetu hasła (user kliknął link z maila)
+  // To ma priorytet nad automatycznym wejściem do aplikacji.
+  setTimeout(()=>{
+    if(handlePasswordRecoveryFromURL()){
+      console.log("[Boot] Uruchomiono flow resetu hasła");
+    }
+  },200); // poczekaj aż supa-js obsłuży hash
   const s=document.getElementById("tSel");
   T.forEach(t=>{const o=document.createElement("option");o.value=t.id;o.textContent=t.name;s.appendChild(o);});
   s.addEventListener("change",renderForm);
