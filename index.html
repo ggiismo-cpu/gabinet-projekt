@@ -508,17 +508,24 @@ const SUPABASE_ANON_KEY="sb_publishable_4U8NOcsj5zlX1c-ZA3KMfw_i4uFgZSe";
 try{
   if(window.supabase&&SUPABASE_URL&&!SUPABASE_URL.includes("YOUR-PROJECT")){
     supa=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+    console.log("[Supabase] Klient utworzony. URL:",SUPABASE_URL,"| Key prefix:",SUPABASE_ANON_KEY.substring(0,15)+"...");
     // Przywróć sesję jeśli istnieje
-    supa.auth.getSession().then(({data})=>{
-      if(data.session){supaUser=data.session.user;isOnline=true;appMode="online";updateSyncBadge();updModeInfo();}
+    supa.auth.getSession().then(({data,error})=>{
+      if(error){console.error("[Supabase] getSession error:",error);return;}
+      if(data.session){console.log("[Supabase] Przywrócono sesję:",data.session.user.email);supaUser=data.session.user;isOnline=true;appMode="online";updateSyncBadge();updModeInfo();}
+      else{console.log("[Supabase] Brak aktywnej sesji — wymagane logowanie");}
     });
     supa.auth.onAuthStateChange((e,s)=>{
+      console.log("[Supabase] onAuthStateChange:",e,s?.user?.email||"(brak sesji)");
       supaUser=s?.user||null;
       isOnline=!!supaUser;appMode=isOnline?"online":(appMode==="online"?"offline":appMode);
       updateSyncBadge();updModeInfo();
     });
+  }else{
+    if(!window.supabase)console.error("[Supabase] SDK nie załadowany (window.supabase undefined) — sprawdź internet");
+    else if(!SUPABASE_URL||SUPABASE_URL.includes("YOUR-PROJECT"))console.error("[Supabase] URL nie skonfigurowany");
   }
-}catch(e){console.warn("Supabase init failed (tryb offline-only):",e);}
+}catch(e){console.error("[Supabase] init failed:",e);}
 
 function updateSyncBadge(){
   const b=document.getElementById("syncBadge");if(!b)return;
@@ -546,31 +553,73 @@ function updModeInfo(){
 function toggleSupaLogin(){const el=document.getElementById("supaLogin");el.classList.toggle("on");document.getElementById("pinLogin").style.display="none";}
 function togglePinLogin(){const el=document.getElementById("pinLogin");el.style.display=el.style.display==="none"?"block":"none";document.getElementById("supaLogin").classList.remove("on");}
 async function supaSignIn(){
-  if(!supa){toast("Supabase nie skonfigurowany");return;}
+  if(!supa){toast("Supabase nie skonfigurowany");console.error("[Auth] Supabase client not initialized");return;}
   const em=document.getElementById("supaEmail").value.trim();const pw=document.getElementById("supaPass").value;
   if(!validateEmail(em)||!em){toast("Nieprawidłowy email");return;}
   if(pw.length<6){toast("Hasło min. 6 znaków");return;}
+  console.log("[Auth] Próba logowania:",em,"URL:",SUPABASE_URL,"Key format:",SUPABASE_ANON_KEY.substring(0,20)+"...");
   try{
     const{data,error}=await supa.auth.signInWithPassword({email:em,password:pw});
-    if(error)throw error;
+    if(error){console.error("[Auth] signIn error:",error);throw error;}
+    console.log("[Auth] Zalogowano OK, user:",data.user?.email,"id:",data.user?.id);
     supaUser=data.user;isOnline=true;appMode="online";
     localStorage.setItem("mm_mode","online");
     document.getElementById("loginScr").style.display="none";
     document.getElementById("appWrap").style.display="block";
     waitForDB(()=>{checkReminders();updateSyncBadge();updModeInfo();autoSyncPull();});
     toast("Zalogowano ✓");
-  }catch(e){toast("Błąd: "+e.message);}
+  }catch(e){
+    console.error("[Auth] Błąd logowania (szczegóły):",e);
+    const errMsg="Błąd logowania: "+(e.message||"nieznany")+(e.status?" [HTTP "+e.status+"]":"");
+    toast(errMsg);
+    // Pokaż dodatkowy modal z błędem — żeby user mógł go skopiować
+    document.getElementById("modC").innerHTML='<h3>❌ Błąd logowania</h3>'+
+      '<div class="db" style="border-left-color:var(--dn)"><strong>Komunikat:</strong> '+esc(e.message||"brak")+'</div>'+
+      (e.status?'<div class="db"><strong>HTTP status:</strong> '+e.status+'</div>':'')+
+      '<div class="db"><strong>Email:</strong> '+esc(em)+'</div>'+
+      '<div class="db"><strong>URL Supabase:</strong> '+esc(SUPABASE_URL)+'</div>'+
+      '<div class="db"><strong>Format klucza:</strong> '+esc(SUPABASE_ANON_KEY.substring(0,20))+'...</div>'+
+      '<div style="font:300 10px var(--fb);color:var(--t2);margin-top:8px">Sprawdź w konsoli przeglądarki (F12 → Console) pełny błąd. Najczęstsze przyczyny:<br>• Nieprawidłowy email lub hasło<br>• Nie zarejestrowałeś konta (kliknij "Zarejestruj" najpierw)<br>• Email niepotwierdzony (sprawdź skrzynkę)<br>• Zły URL/klucz Supabase w pliku HTML</div>'+
+      '<div class="brow"><button class="b b2" onclick="closeMo()">OK</button></div>';
+    document.getElementById("modal").classList.add("on");
+  }
 }
 async function supaSignUp(){
-  if(!supa){toast("Supabase nie skonfigurowany");return;}
+  if(!supa){toast("Supabase nie skonfigurowany");console.error("[Auth] Supabase client not initialized");return;}
   const em=document.getElementById("supaEmail").value.trim();const pw=document.getElementById("supaPass").value;
   if(!validateEmail(em)||!em){toast("Nieprawidłowy email");return;}
   if(pw.length<6){toast("Hasło min. 6 znaków");return;}
+  console.log("[Auth] Próba rejestracji:",em);
   try{
     const{data,error}=await supa.auth.signUp({email:em,password:pw});
-    if(error)throw error;
-    toast("Konto utworzone! Sprawdź email (jeśli wymagane) i zaloguj się.");
-  }catch(e){toast("Błąd: "+e.message);}
+    if(error){console.error("[Auth] signUp error:",error);throw error;}
+    console.log("[Auth] Rejestracja OK:",data);
+    const confirmNeeded=!data.session;
+    if(confirmNeeded){
+      document.getElementById("modC").innerHTML='<h3>✅ Konto utworzone</h3>'+
+        '<div class="db" style="border-left-color:var(--sc)">Sprawdź skrzynkę <strong>'+esc(em)+'</strong> i kliknij link potwierdzający.</div>'+
+        '<div class="db"><strong>Następnie:</strong> wróć tutaj i kliknij "Zaloguj".</div>'+
+        '<div style="font:300 10px var(--fb);color:var(--t2);margin-top:8px">Jeśli mail nie przyszedł w ciągu 5 min — sprawdź Spam. W panelu Supabase możesz też wyłączyć wymaganą weryfikację e-mail (Authentication → Providers → Email → Confirm email: OFF).</div>'+
+        '<div class="brow"><button class="b bs" onclick="closeMo()">Rozumiem</button></div>';
+      document.getElementById("modal").classList.add("on");
+    }else{
+      toast("Zarejestrowano i zalogowano ✓");
+      supaUser=data.user;isOnline=true;appMode="online";
+      localStorage.setItem("mm_mode","online");
+      document.getElementById("loginScr").style.display="none";
+      document.getElementById("appWrap").style.display="block";
+      waitForDB(()=>{checkReminders();updateSyncBadge();updModeInfo();});
+    }
+  }catch(e){
+    console.error("[Auth] Błąd rejestracji (szczegóły):",e);
+    toast("Błąd rejestracji: "+(e.message||"nieznany"));
+    document.getElementById("modC").innerHTML='<h3>❌ Błąd rejestracji</h3>'+
+      '<div class="db" style="border-left-color:var(--dn)"><strong>Komunikat:</strong> '+esc(e.message||"brak")+'</div>'+
+      (e.status?'<div class="db"><strong>HTTP status:</strong> '+e.status+'</div>':'')+
+      '<div style="font:300 10px var(--fb);color:var(--t2);margin-top:8px">Najczęstsze przyczyny:<br>• Email już zarejestrowany (użyj "Zaloguj")<br>• Hasło za krótkie/słabe<br>• Zły URL lub klucz Supabase</div>'+
+      '<div class="brow"><button class="b b2" onclick="closeMo()">OK</button></div>';
+    document.getElementById("modal").classList.add("on");
+  }
 }
 async function supaSignOut(){if(supa){await supa.auth.signOut();supaUser=null;isOnline=false;appMode="offline";localStorage.setItem("mm_mode","offline");updateSyncBadge();updModeInfo();toast("Wylogowano");}}
 
