@@ -41,8 +41,24 @@
 .cal-grid{display:grid;grid-template-columns:60px repeat(6,1fr);gap:1px;background:var(--bd);border-radius:var(--r);overflow:hidden;font:400 10px var(--fb)}
 .cal-hdr{background:var(--t);color:#fff;padding:6px 4px;text-align:center;font:600 10px var(--fb)}.cal-time{background:var(--bg2);padding:4px;text-align:right;font:500 9px var(--fb);color:var(--t2)}
 .cal-slot{background:#fff;padding:3px;min-height:28px;cursor:pointer;transition:.15s;position:relative}.cal-slot:hover{background:var(--g3)}.cal-slot.off{background:var(--bg2);cursor:default}.cal-slot.off:hover{background:var(--bg2)}.cal-slot.booked{background:var(--g3);cursor:default}
-.cal-ev{background:var(--g);color:#fff;padding:2px 4px;border-radius:3px;font:500 8px var(--fb);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-ev{background:var(--g);color:#fff;padding:2px 4px;border-radius:3px;font:500 8px var(--fb);line-height:1.3;overflow:hidden}
+.cal-ev .ce-name{font:600 8px var(--fb);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-ev .ce-info{font:400 7px var(--fb);opacity:.85;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
 .cal-suggest{background:var(--sb);border:1px solid var(--sc);border-radius:var(--rs);padding:10px;margin-top:8px;font:400 12px var(--fb)}
+/* Widok miesięczny kalendarza */
+.cal-month-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-month-dh{background:var(--t);color:#fff;padding:5px 4px;text-align:center;font:600 10px var(--fb);border-radius:3px}
+.cal-month-cell{background:var(--c);border:1px solid var(--bd);border-radius:var(--rs);padding:4px;min-height:68px;cursor:pointer;transition:.15s;overflow:hidden}
+.cal-month-cell:hover{border-color:var(--g);background:var(--g3)}
+.cal-month-cell.off{background:var(--bg2);cursor:default;opacity:.7}
+.cal-month-cell.off:hover{background:var(--bg2);border-color:var(--bd)}
+.cal-month-cell.today{border-color:var(--g)!important;box-shadow:0 0 0 1px var(--g)}
+.cal-month-num{font:700 11px var(--fb);color:var(--t);margin-bottom:2px;line-height:1}
+.cal-month-num.today{background:var(--g);color:#fff;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:9px}
+.cal-month-ev{background:var(--g3);border-left:2px solid var(--g);padding:1px 3px;border-radius:2px;font:400 7.5px var(--fb);margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;line-height:1.4}
+.cal-month-ev:hover{background:var(--g);color:#fff}
+/* Przełącznik widoku tygodniowy/miesięczny */
+.cal-view-toggle{display:flex;gap:3px;margin-left:8px}
 /* Stats */
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px}.stat-card{background:var(--c);border:1px solid var(--bd);border-radius:var(--r);padding:14px;text-align:center}.stat-card .sv{font:700 24px var(--fd);color:var(--g)}.stat-card .sl2{font:400 10px var(--fb);color:var(--t2);margin-top:2px}
 .chart-bar{display:flex;align-items:end;gap:4px;height:120px;margin-top:8px;padding-top:4px}.chart-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}.chart-col .bar{width:100%;background:var(--g);border-radius:3px 3px 0 0;min-height:2px;transition:.3s}.chart-col .lbl{font:500 8px var(--fb);color:var(--t2);text-align:center;writing-mode:vertical-lr;transform:rotate(180deg);max-height:50px;overflow:hidden}
@@ -294,7 +310,7 @@
   <input type="text" id="calSrch" placeholder="🔍 Szukaj wizyty: nazwisko, imię, telefon..." autocomplete="off">
   <div id="calResults" class="cal-results"></div>
 </div>
-<div class="cal-hd"><div class="cal-nav"><button class="b b2 bsm" onclick="calNav(-1)">◀</button><button class="b b2 bsm" onclick="calNav(0)">Dziś</button><button class="b b2 bsm" onclick="calNav(1)">▶</button><button class="b b1 bsm" onclick="openSeriesPlanner(null,null)" style="margin-left:8px">📋 Zaplanuj serię</button><button class="b bs bsm" onclick="quickSyncCalendar()" title="Synchronizuj kalendarz z chmurą (pobierz + wyślij)" style="margin-left:4px">🔄 Synchronizuj</button><span id="calSyncBadge" style="margin-left:6px;font:500 10px var(--fb);color:var(--t2)"></span></div><h3 id="calTitle"></h3></div>
+<div class="cal-hd"><div class="cal-nav"><button class="b b2 bsm" onclick="calNav(-1)">◀</button><button class="b b2 bsm" onclick="calNav(0)">Dziś</button><button class="b b2 bsm" onclick="calNav(1)">▶</button><div class="cal-view-toggle"><button class="b b1 bsm" data-cal-view="week" onclick="calSetView('week')">Tydzień</button><button class="b b2 bsm" data-cal-view="month" onclick="calSetView('month')">Miesiąc</button></div><button class="b b1 bsm" onclick="openSeriesPlanner(null,null)" style="margin-left:8px">📋 Zaplanuj serię</button><button class="b bs bsm" onclick="quickSyncCalendar()" title="Synchronizuj kalendarz z chmurą (pobierz + wyślij)" style="margin-left:4px">🔄 Synchronizuj</button><span id="calSyncBadge" style="margin-left:6px;font:500 10px var(--fb);color:var(--t2)"></span></div><h3 id="calTitle"></h3></div>
 <div id="calGrid"></div>
 <div class="cal-suggest" id="calSuggest"></div></div></div>
 
@@ -868,11 +884,14 @@ async function syncAllToCloud(){
   const p=document.getElementById("migProgress");p.style.display="block";p.className="mig-status";
   try{
     const cls=await dbGetAll("clients");const cons=await dbGetAll("consents");const appts=await dbGetAll("appointments");
-    let done=0,total=cls.length+cons.length+appts.length;
+    const prods=await dbGetAll("products");const moves=await dbGetAll("stockMoves");
+    let done=0,total=cls.length+cons.length+appts.length+prods.length+moves.length;
     p.textContent="Migracja: 0 / "+total;
     for(const c of cls){await supaUpsert("clients",c);done++;p.textContent="Klienci: "+done+" / "+total;}
     for(const c of cons){await supaUpsert("consents",c);done++;p.textContent="Zgody: "+done+" / "+total;}
     for(const a of appts){await supaUpsert("appointments",a);done++;p.textContent="Wizyty: "+done+" / "+total;}
+    for(const r of prods){await supaUpsert("products",r);done++;p.textContent="Produkty: "+done+" / "+total;}
+    for(const r of moves){await supaUpsert("stock_moves",r);done++;p.textContent="Ruchy magazynu: "+done+" / "+total;}
     p.className="mig-status ok";p.textContent="✓ Zsynchronizowano "+total+" rekordów do chmury";
     toast("Migracja ukończona ✓");
   }catch(e){p.className="mig-status err";p.textContent="❌ Błąd: "+e.message;}
@@ -1591,7 +1610,10 @@ async function cosmoSave(){
       prod.stock=Math.max(0,(+prod.stock||0)-(+it.qty||1));
       prod.updatedAt=new Date().toISOString();
       await dbPut("products",prod);
-      await dbAdd("stockMoves",{productId:prod.id,qty:-(it.qty||1),reason:"sprzedaż po zabiegu",appointmentId:null,consentId:savedConId,createdAt:new Date().toISOString()});
+      supaUpsert("products",prod).catch(()=>{}); // natychmiastowy push stanu
+      const moveData={productId:prod.id,qty:-(it.qty||1),reason:"sprzedaż po zabiegu",appointmentId:null,consentId:savedConId,createdAt:new Date().toISOString()};
+      const moveId=await dbAdd("stockMoves",moveData);
+      supaUpsert("stock_moves",{...moveData,id:moveId}).catch(()=>{});
     }
   }
   await dbPut("consents",con);
@@ -1667,11 +1689,22 @@ const HRS={1:[8,18],2:[8,18],3:[8,18],4:[8,18],5:[8,18],6:[9,15],0:null};
 const DNM=["Nd","Pn","Wt","Śr","Cz","Pt","Sb"];
 function weekStart(d){const r=new Date(d);const dy=r.getDay();r.setDate(r.getDate()-(dy===0?6:dy-1));r.setHours(0,0,0,0);return r;}
 
+let _calView="week"; // "week" | "month"
+
+function calSetView(v){
+  _calView=v;
+  document.querySelectorAll("[data-cal-view]").forEach(b=>{
+    b.classList.toggle("b1",b.dataset.calView===v);
+    b.classList.toggle("b2",b.dataset.calView!==v);
+  });
+  renderCal();
+}
+
 async function renderCal(){
-  const ws=weekStart(calDate);const days=[];for(let i=0;i<6;i++){const d=new Date(ws);d.setDate(d.getDate()+i);days.push(d);}
-  document.getElementById("calTitle").textContent=ws.toLocaleDateString("pl-PL",{day:"numeric",month:"short"})+" – "+days[5].toLocaleDateString("pl-PL",{day:"numeric",month:"short",year:"numeric"});
-  const appts=await dbGetAll("appointments");const cls=await dbGetAll("clients");const cons=await dbGetAll("consents");
-  // Zbuduj mapę consent status per clientId: rodo/foto/marketing booleany
+  const appts=await dbGetAll("appointments");
+  const cls=await dbGetAll("clients");
+  const cons=await dbGetAll("consents");
+  // Mapa statusów zgód per klient (potrzebna w obu widokach)
   const consByClient={};
   cons.forEach(co=>{
     if(!co.clientId)return;
@@ -1681,10 +1714,19 @@ async function renderCal(){
     if(co.treatmentId==="zgoda_rodo"||co.marketing)s.marketing=true;
     if(co.wizDok||co.wizSzk||co.wizMar)s.foto=true;
   });
-  // Eksportuj do window — showApt użyje do wyświetlania badge'y w modal-u szczegółów
   window._consByClient=consByClient;
+  if(_calView==="month"){await _renderCalMonth(appts,cls,consByClient);}
+  else{await _renderCalWeek(appts,cls,consByClient);}
+}
+
+async function _renderCalWeek(appts,cls,consByClient){
+  const ws=weekStart(calDate);const days=[];for(let i=0;i<6;i++){const d=new Date(ws);d.setDate(d.getDate()+i);days.push(d);}
+  document.getElementById("calTitle").textContent=ws.toLocaleDateString("pl-PL",{day:"numeric",month:"short"})+" – "+days[5].toLocaleDateString("pl-PL",{day:"numeric",month:"short",year:"numeric"});
   let g='<div class="cal-grid"><div class="cal-hdr"></div>';
-  days.forEach(d=>{g+='<div class="cal-hdr">'+DNM[d.getDay()]+'<br>'+d.getDate()+'</div>';});
+  days.forEach(d=>{
+    const isToday=d.toISOString().substring(0,10)===new Date().toISOString().substring(0,10);
+    g+='<div class="cal-hdr"'+(isToday?' style="background:var(--g);border-bottom:2px solid var(--g2)"':'')+'>'+DNM[d.getDay()]+'<br>'+d.getDate()+'</div>';
+  });
   for(let h=8;h<18;h++){for(let m=0;m<60;m+=15){
     const tl=(h<10?"0":"")+h+":"+(m<10?"0":"")+m;
     g+='<div class="cal-time">'+tl+'</div>';
@@ -1696,33 +1738,97 @@ async function renderCal(){
         const cl=cls.find(c=>c.id===occupied.clientId);
         const isStart=occupied.time===tl;
         if(isStart){
-          // Badge zgód: zielona kropka = ma RODO+foto+marketing, pomarańczowa = niekomplet, czerwona = brak wszystkiego
           const s=consByClient[occupied.clientId]||{rodo:false,marketing:false,foto:false};
-          const allThree=s.rodo&&s.marketing&&s.foto;
-          const some=s.rodo||s.marketing||s.foto;
+          const allThree=s.rodo&&s.marketing&&s.foto;const some=s.rodo||s.marketing||s.foto;
           const badgeColor=allThree?"var(--sc)":some?"var(--wn)":"var(--dn)";
           const badgeTitle="RODO: "+(s.rodo?"✓":"✗")+" | Marketing: "+(s.marketing?"✓":"✗")+" | Foto: "+(s.foto?"✓":"✗");
-          const badge='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+badgeColor+';margin-right:4px;vertical-align:middle" title="'+badgeTitle+'"></span>';
-          g+='<div class="cal-slot booked" onclick="showApt('+occupied.id+')"><div class="cal-ev">'+badge+esc((cl?.name||"").split(" ")[0])+'</div></div>';
-        }else{g+='<div class="cal-slot booked" style="opacity:.5"></div>';}
+          const badge='<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'+badgeColor+';margin-right:3px;flex-shrink:0" title="'+badgeTitle+'"></span>';
+          const firstName=esc((cl?.name||"").split(" ")[0]);
+          const trShort=esc((occupied.treatment||"").substring(0,20));
+          const durLabel=occupied.duration?occupied.duration+"min":"";
+          const infoLine=[trShort,durLabel].filter(Boolean).join(" · ");
+          g+='<div class="cal-slot booked" onclick="showApt('+occupied.id+')" title="'+esc(cl?.name||"?")+'&#10;'+esc(occupied.treatment||"")+'&#10;'+esc(occupied.time)+(occupied.duration?" ("+occupied.duration+" min)":"")+'"><div class="cal-ev" style="display:flex;flex-direction:column">'+
+            '<span style="display:flex;align-items:center">'+badge+'<span class="ce-name">'+firstName+'</span></span>'+
+            (infoLine?'<span class="ce-info">'+infoLine+'</span>':'')+
+            '</div></div>';
+        }else{g+='<div class="cal-slot booked" style="opacity:.35"></div>';}
       }
       else{g+='<div class="cal-slot" onclick="bookSlot(\''+ds+'\',\''+tl+'\')">&nbsp;</div>';}
     });
   }}
-  g+='</div>';document.getElementById("calGrid").innerHTML=g;
-  // Legenda
-  let legend='<div style="display:flex;gap:10px;font:300 9px var(--fb);color:var(--t2);margin-top:4px;justify-content:center">';
+  g+='</div>';
+  document.getElementById("calGrid").innerHTML=g;
+  let legend='<div style="display:flex;gap:10px;font:300 9px var(--fb);color:var(--t2);margin-top:4px;justify-content:center;flex-wrap:wrap">';
   legend+='<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--sc);margin-right:3px;vertical-align:middle"></span>komplet zgód</span>';
   legend+='<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--wn);margin-right:3px;vertical-align:middle"></span>częściowe</span>';
   legend+='<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--dn);margin-right:3px;vertical-align:middle"></span>brak zgód</span>';
   legend+='</div>';
   document.getElementById("calGrid").insertAdjacentHTML("afterend",'<div id="calLegend">'+legend+'</div>');
-  // Usuń poprzednią legendę jeśli jest (double-render)
   const existing=document.querySelectorAll("#calLegend");
   if(existing.length>1)existing[0].remove();
   suggestNext(appts);
 }
-function calNav(dir){if(dir===0)calDate=new Date();else calDate.setDate(calDate.getDate()+dir*7);renderCal();}
+
+async function _renderCalMonth(appts,cls,consByClient){
+  const y=calDate.getFullYear(),mo=calDate.getMonth();
+  const firstDay=new Date(y,mo,1);
+  const lastDay=new Date(y,mo+1,0);
+  const todayStr=new Date().toISOString().substring(0,10);
+  document.getElementById("calTitle").textContent=firstDay.toLocaleDateString("pl-PL",{month:"long",year:"numeric"});
+  const leadBlank=(firstDay.getDay()||7)-1;
+  let g='<div class="cal-month-grid">';
+  ["Pn","Wt","Śr","Cz","Pt","Sb","Nd"].forEach(dn=>g+='<div class="cal-month-dh">'+dn+'</div>');
+  for(let i=0;i<leadBlank;i++)g+='<div class="cal-month-cell off"></div>';
+  for(let day=1;day<=lastDay.getDate();day++){
+    const dd=new Date(y,mo,day);const dw=dd.getDay();
+    const ds=dd.toISOString().substring(0,10);
+    const hrs=HRS[dw];const isOff=!hrs;const isToday=ds===todayStr;
+    const dayAppts=appts.filter(a=>a.date===ds).sort((a,b)=>a.time.localeCompare(b.time));
+    g+='<div class="cal-month-cell'+(isOff?" off":"")+(isToday?" today":"")+'" onclick="calGoDay(\''+ds+'\')">';
+    g+='<div class="cal-month-num'+(isToday?" today":"")+'">'+day+'</div>';
+    const LIMIT=3;
+    dayAppts.slice(0,LIMIT).forEach(apt=>{
+      const cl=cls.find(c=>c.id===apt.clientId);
+      const nm=esc((cl?.name||"?").split(" ")[0]);
+      const tr=esc((apt.treatment||"").substring(0,14));
+      const s=consByClient[apt.clientId]||{};
+      const dot=(s.rodo&&s.marketing&&s.foto)?"var(--sc)":(s.rodo||s.marketing||s.foto)?"var(--wn)":"var(--dn)";
+      g+='<div class="cal-month-ev" onclick="event.stopPropagation();showApt('+apt.id+')" title="'+esc(cl?.name||"?")+'&#10;'+esc(apt.treatment||"")+'&#10;'+esc(apt.time)+(apt.duration?" ("+apt.duration+" min)":"")+'">'+
+        '<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:'+dot+';margin-right:2px;vertical-align:middle"></span>'+
+        '<strong>'+esc(apt.time)+'</strong> '+nm+(tr?' · '+tr:'')+
+        '</div>';
+    });
+    if(dayAppts.length>LIMIT)g+='<div style="font:400 7px var(--fb);color:var(--t2);padding:1px 3px">+' +(dayAppts.length-LIMIT)+' więcej</div>';
+    g+='</div>';
+  }
+  // Uzupełnij brakujące komórki do pełnych 6 rzędów
+  const totalCells=leadBlank+lastDay.getDate();const rem=(7-totalCells%7)%7;
+  for(let i=0;i<rem;i++)g+='<div class="cal-month-cell off"></div>';
+  g+='</div>';
+  document.getElementById("calGrid").innerHTML=g;
+  const existing=document.querySelectorAll("#calLegend");
+  existing.forEach(el=>el.remove());
+  document.getElementById("calGrid").insertAdjacentHTML("afterend",
+    '<div id="calLegend"><div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px;text-align:center">💡 Kliknij dzień → widok tygodniowy &nbsp;|&nbsp; Kliknij wizytę → szczegóły &nbsp;|&nbsp; Kolor kropki = status zgód</div></div>');
+  suggestNext(appts);
+}
+
+// Kliknięcie dnia w widoku miesięcznym — przejście do widoku tygodniowego
+function calGoDay(ds){
+  calDate=new Date(ds+"T12:00:00");
+  _calView="week";
+  document.querySelectorAll("[data-cal-view]").forEach(b=>{
+    b.classList.toggle("b1",b.dataset.calView==="week");
+    b.classList.toggle("b2",b.dataset.calView!=="week");
+  });
+  renderCal();
+}
+function calNav(dir){
+  if(dir===0){calDate=new Date();}
+  else if(_calView==="month"){calDate.setMonth(calDate.getMonth()+dir);}
+  else{calDate.setDate(calDate.getDate()+dir*7);}
+  renderCal();
+}
 
 async function suggestNext(appts){
   const now=new Date();let found=null;
@@ -2887,10 +2993,11 @@ async function saveStockItem(productId){
   };
   if(productId){
     const all=await dbGetAll("products");const ex=all.find(x=>x.id===productId);
-    if(ex){Object.assign(ex,rec);await dbPut("products",ex);}
+    if(ex){Object.assign(ex,rec);await dbPut("products",ex);supaUpsert("products",ex).catch(()=>{});}
   }else{
     rec.createdAt=new Date().toISOString();
-    await dbAdd("products",rec);
+    const newId=await dbAdd("products",rec);
+    supaUpsert("products",{...rec,id:newId}).catch(()=>{});
   }
   closeMo();toast("Zapisano ✓");markDirty();renderStock();
 }
@@ -2898,7 +3005,7 @@ async function saveStockItem(productId){
 async function deleteStockItem(productId){
   if(!confirm("Usunąć produkt z bazy? Historia ruchów magazynowych pozostanie."))return;
   await dbDel("products",productId);
-  toast("Usunięto ✓");renderStock();
+  markDirty();toast("Usunięto ✓");renderStock();
 }
 
 // Szybka korekta stanu o ±1 z rejestracją ruchu
@@ -2908,8 +3015,12 @@ async function adjustStock(productId,delta){
   const newStock=Math.max(0,(+p.stock||0)+delta);
   p.stock=newStock;p.updatedAt=new Date().toISOString();
   await dbPut("products",p);
-  await dbAdd("stockMoves",{productId,qty:delta,reason:delta>0?"korekta +":"korekta -",createdAt:new Date().toISOString()});
-  renderStock();
+  const moveRec={productId,qty:delta,reason:delta>0?"korekta +":"korekta -",createdAt:new Date().toISOString()};
+  const moveId=await dbAdd("stockMoves",moveRec);
+  // Sync obu rekordów natychmiast
+  supaUpsert("products",p).catch(()=>{});
+  supaUpsert("stock_moves",{...moveRec,id:moveId}).catch(()=>{});
+  markDirty();renderStock();
 }
 
 // Eksport magazynu do CSV — do księgowości / inwentaryzacji
@@ -4673,13 +4784,26 @@ async function globalFullSync(showProgress=true){
     const localClIds=new Set((await dbGetAll("clients")).map(r=>r.id));
     const localCoIds=new Set((await dbGetAll("consents")).map(r=>r.id));
     const localApIds=new Set((await dbGetAll("appointments")).map(r=>r.id));
-    const localPrIds=new Set((await dbGetAll("products")).map(r=>r.id));
+    const localProds=await dbGetAll("products");
+    const localPrMap=Object.fromEntries(localProds.map(r=>[r.id,r]));
     const localMvIds=new Set((await dbGetAll("stockMoves")).map(r=>r.id));
     let pulled=0;
     for(const r of(clCloud||[])){if(r.local_id&&!localClIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("clients",rec).catch(()=>{});pulled++;}}
     for(const r of(coCloud||[])){if(r.local_id&&!localCoIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("consents",rec).catch(()=>{});pulled++;}}
     for(const r of(apCloud||[])){if(r.local_id&&!localApIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("appointments",rec).catch(()=>{});pulled++;}}
-    for(const r of(prCloud||[])){if(r.local_id&&!localPrIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("products",rec).catch(()=>{});pulled++;}}
+    // Produkty: dodaj nowe LUB zaktualizuj jeśli cloud.updatedAt > local.updatedAt
+    for(const r of(prCloud||[])){
+      if(!r.local_id)continue;
+      const local=localPrMap[r.local_id];
+      const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;
+      if(!local){
+        await dbAdd("products",rec).catch(()=>{});pulled++;
+      }else if((r.updatedAt||"")>(local.updatedAt||"")){
+        // Cloud jest nowszy — zaktualizuj lokalny (zachowaj niezsynchronizowane pola)
+        Object.assign(local,rec);
+        await dbPut("products",local).catch(()=>{});pulled++;
+      }
+    }
     for(const r of(mvCloud||[])){if(r.local_id&&!localMvIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("stockMoves",rec).catch(()=>{});pulled++;}}
     _lastSyncTs=Date.now();
     localStorage.setItem("mm_lastSync",_lastSyncTs);
