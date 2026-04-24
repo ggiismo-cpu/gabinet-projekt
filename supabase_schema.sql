@@ -221,3 +221,110 @@ create trigger clients_set_updated_at_trg
 -- =========================================================
 
 -- === KONIEC ===
+
+-- =========================================================
+--  MIGRACJA v1.2 — tabele magazynowe (products, stock_moves)
+--  Uruchom w SQL Editor: wklej i kliknij RUN
+--  Idempotentny — bezpieczne ponowne uruchomienie
+-- =========================================================
+
+-- =========================================================
+--  TABELA: products  (katalog produktów magazynu)
+-- =========================================================
+create table if not exists public.products (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references auth.users(id) on delete cascade,
+  local_id        bigint not null,
+  name            text not null,
+  brand           text,
+  category        text,
+  kind            text default 'usable',  -- usable | retail | both
+  purchase_price  numeric(10,2),
+  retail_price    numeric(10,2),
+  size            text,
+  unit            text default 'szt',
+  stock           numeric(10,2) default 0,
+  min_stock       numeric(10,2) default 0,
+  notes           text,
+  "createdAt"     timestamptz default now(),
+  "updatedAt"     timestamptz default now(),
+  constraint products_local_user_uk unique (local_id, user_id)
+);
+
+create index if not exists products_user_idx   on public.products(user_id);
+create index if not exists products_kind_idx   on public.products(user_id, kind);
+
+alter table public.products enable row level security;
+
+drop policy if exists "products_select_own" on public.products;
+create policy "products_select_own" on public.products
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "products_insert_own" on public.products;
+create policy "products_insert_own" on public.products
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "products_update_own" on public.products;
+create policy "products_update_own" on public.products
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "products_delete_own" on public.products;
+create policy "products_delete_own" on public.products
+  for delete using (auth.uid() = user_id);
+
+
+-- =========================================================
+--  TABELA: stock_moves  (historia ruchów magazynowych)
+-- =========================================================
+create table if not exists public.stock_moves (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references auth.users(id) on delete cascade,
+  local_id        bigint not null,
+  "productId"     bigint,       -- lokalne id produktu (IndexedDB)
+  qty             numeric(10,2),-- dodatni=przyjęcie, ujemny=rozchód
+  reason          text,         -- "sprzedaż po zabiegu" | "korekta +" | "korekta -"
+  "appointmentId" bigint,
+  "consentId"     bigint,
+  "createdAt"     timestamptz default now(),
+  constraint stock_moves_local_user_uk unique (local_id, user_id)
+);
+
+create index if not exists stock_moves_user_idx     on public.stock_moves(user_id);
+create index if not exists stock_moves_product_idx  on public.stock_moves(user_id, "productId");
+
+alter table public.stock_moves enable row level security;
+
+drop policy if exists "stock_moves_select_own" on public.stock_moves;
+create policy "stock_moves_select_own" on public.stock_moves
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "stock_moves_insert_own" on public.stock_moves;
+create policy "stock_moves_insert_own" on public.stock_moves
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "stock_moves_update_own" on public.stock_moves;
+create policy "stock_moves_update_own" on public.stock_moves
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "stock_moves_delete_own" on public.stock_moves;
+create policy "stock_moves_delete_own" on public.stock_moves
+  for delete using (auth.uid() = user_id);
+
+-- Auto-update updatedAt dla products
+create or replace function public.products_set_updated_at()
+returns trigger language plpgsql as $$
+begin new."updatedAt" = now(); return new; end $$;
+
+drop trigger if exists products_updated_at_trg on public.products;
+create trigger products_updated_at_trg
+  before update on public.products
+  for each row execute function public.products_set_updated_at();
+
+-- =========================================================
+--  WERYFIKACJA MIGRACJI v1.2
+-- =========================================================
+-- select table_name from information_schema.tables
+-- where table_schema='public'
+--   and table_name in ('products','stock_moves');
+-- Oczekiwane: 2 wiersze
+-- =========================================================
