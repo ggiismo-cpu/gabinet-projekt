@@ -203,6 +203,7 @@
 <button data-v="clients">Klienci</button>
 <button data-v="calendar">Kalendarz</button>
 <button data-v="menu">Menu</button>
+<button data-v="stock">📦 Magazyn</button>
 <button data-v="stats">Statystyki</button>
 <button data-v="settings" style="border-color:var(--t2);color:var(--t2)">⚙</button>
 </div>
@@ -270,7 +271,7 @@
   <input type="text" id="calSrch" placeholder="🔍 Szukaj wizyty: nazwisko, imię, telefon..." autocomplete="off">
   <div id="calResults" class="cal-results"></div>
 </div>
-<div class="cal-hd"><div class="cal-nav"><button class="b b2 bsm" onclick="calNav(-1)">◀</button><button class="b b2 bsm" onclick="calNav(0)">Dziś</button><button class="b b2 bsm" onclick="calNav(1)">▶</button><button class="b b1 bsm" onclick="openSeriesPlanner(null,null)" style="margin-left:8px">📋 Zaplanuj serię</button></div><h3 id="calTitle"></h3></div>
+<div class="cal-hd"><div class="cal-nav"><button class="b b2 bsm" onclick="calNav(-1)">◀</button><button class="b b2 bsm" onclick="calNav(0)">Dziś</button><button class="b b2 bsm" onclick="calNav(1)">▶</button><button class="b b1 bsm" onclick="openSeriesPlanner(null,null)" style="margin-left:8px">📋 Zaplanuj serię</button><button class="b bs bsm" onclick="quickSyncCalendar()" title="Synchronizuj kalendarz z chmurą (pobierz + wyślij)" style="margin-left:4px">🔄 Synchronizuj</button><span id="calSyncBadge" style="margin-left:6px;font:500 10px var(--fb);color:var(--t2)"></span></div><h3 id="calTitle"></h3></div>
 <div id="calGrid"></div>
 <div class="cal-suggest" id="calSuggest"></div></div></div>
 
@@ -278,6 +279,28 @@
 <div class="cd"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;gap:6px">Menu Zabiegowe — cennik i opisy <button class="b bs bsm" onclick="openTreatmentForm(null,null)">➕ Nowy zabieg</button></div>
 <div class="menu-search"><input type="text" id="menuSrch" placeholder="Szukaj zabiegu..."></div>
 <div id="menuContent"></div></div></div>
+
+<div id="vStock" class="vw">
+<div class="cd"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">📦 Magazyn i baza produktów
+<div class="brow" style="margin:0">
+<button class="b bs bsm" onclick="openStockForm(null)">➕ Dodaj produkt</button>
+<button class="b b1 bsm" onclick="showStockImportModal()">📥 Wczytaj cennik</button>
+<button class="b b2 bsm" onclick="exportStockCSV()">📊 Eksport CSV</button>
+</div></div>
+<!-- Podsumowanie wartości magazynu -->
+<div id="stockSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
+<!-- Zakładki: zużywalne / do odsprzedaży / cena dla klienta -->
+<div class="brow" style="margin-bottom:8px">
+<button class="b b2 bsm" data-stock-tab="usable" onclick="switchStockTab('usable')">🧪 Zużywalne gabinetu</button>
+<button class="b b2 bsm" data-stock-tab="retail" onclick="switchStockTab('retail')">🛍 Do odsprzedaży</button>
+<button class="b b2 bsm" data-stock-tab="prices" onclick="switchStockTab('prices')">💰 Ceny dla klienta</button>
+</div>
+<!-- Filtry + wyszukiwarka -->
+<div class="menu-search" style="margin-bottom:6px">
+<input type="text" id="stockSrch" placeholder="🔍 Szukaj produktu..." oninput="renderStock()">
+</div>
+<div id="stockContent"></div>
+</div></div>
 
 <div id="vStats" class="vw">
 <div class="cd"><div class="ct">Statystyki</div>
@@ -859,8 +882,56 @@ async function autoSyncPull(){
 
 // Porównuje lokalny IndexedDB z Supabase — pokazuje różnice, ostrzega o brakach w chmurze.
 // Przydatne gdy user ma wątpliwości czy wizyty się zapisują w chmurze.
-async function runSyncDiagnostics(){
-  const el=document.getElementById("syncDiag");if(!el)return;
+// Szybka synchronizacja kalendarza z chmurą — wywołuje pull (nowe wizyty z chmury)
+// oraz push (lokalne wizyty bez odpowiednika w chmurze). Pokazuje toast z podsumowaniem.
+async function quickSyncCalendar(){
+  const badge=document.getElementById("calSyncBadge");
+  if(!supa||!supaUser){
+    toast("❌ Nie zalogowany w chmurze — zaloguj się ponownie");
+    if(badge)badge.textContent="📴 offline";
+    return;
+  }
+  if(badge)badge.textContent="🔄 synchronizuję...";
+  let pulled=0,pushed=0,err=0;
+  try{
+    // PULL: pobierz wizyty z chmury dla tego usera
+    const{data:cloudAppts,error}=await supa.from("appointments").select("*").eq("user_id",supaUser.id);
+    if(error)throw error;
+    const local=await dbGetAll("appointments");
+    const localByLocalId=new Set(local.map(a=>a.id));
+    for(const c of(cloudAppts||[])){
+      if(c.local_id&&!localByLocalId.has(c.local_id)){
+        const rec={...c,id:c.local_id};delete rec.user_id;delete rec.local_id;
+        try{await dbAdd("appointments",rec);pulled++;}catch(e){err++;}
+      }
+    }
+    // PUSH: wyślij wszystkie lokalne (upsert is idempotent)
+    const localAfter=await dbGetAll("appointments");
+    for(const a of localAfter){
+      try{const r=await supaUpsert("appointments",a);if(r)pushed++;}catch(e){err++;}
+    }
+  }catch(e){
+    console.error("quickSync:",e);
+    toast("❌ Błąd synchronizacji: "+(e.message||"?"));
+    if(badge)badge.textContent="❌ błąd";
+    return;
+  }
+  await renderCal();updateSyncBadge();
+  let msg="✓ Sync: ↓"+pulled+" pobrano, ↑"+pushed+" wysłano";
+  if(err)msg+=", ⚠ "+err+" błędów";
+  toast(msg);
+  if(badge)badge.textContent="✓ "+new Date().toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"});
+}
+
+// Aktualizuje badge statusu sync w kalendarzu — liczba lokalnych wizyt bez local_id w chmurze
+async function updateSyncBadge(){
+  const badge=document.getElementById("calSyncBadge");if(!badge)return;
+  if(!supa||!supaUser||!isOnline){badge.textContent="📴 offline";return;}
+  // szybki tekst — nie blokujemy żeby nie robić ciężkich zapytań
+  badge.textContent="☁️ online";
+}
+
+async function runSyncDiagnostics(){  const el=document.getElementById("syncDiag");if(!el)return;
   el.className="mig-status";el.innerHTML="⏳ Sprawdzanie...";
   // Sprawdź czy w ogóle jesteśmy zalogowani w Supabase
   if(!supa){el.className="mig-status err";el.innerHTML="❌ Supabase nie jest skonfigurowany (klient JS nie został utworzony).";return;}
@@ -1059,7 +1130,7 @@ const _VIEW_STACK_MAX=20;
 function showV(v,opts){
   opts=opts||{};
   const cur=document.querySelector(".vw.on")?.id;
-  const curKey={vConsent:"consent",vClients:"clients",vDetail:"detail",vCal:"calendar",vStats:"stats",vSettings:"settings",vMenu:"menu"}[cur];
+  const curKey={vConsent:"consent",vClients:"clients",vDetail:"detail",vCal:"calendar",vStats:"stats",vSettings:"settings",vMenu:"menu",vStock:"stock"}[cur];
   // Push tylko jeśli: nie jesteśmy w trakcie "wracania", aktualny widok istnieje, i nie idziemy na ten sam widok
   if(!opts.skipPush && curKey && curKey!==v){
     // Kontekst: dla widoku "detail" zapisujemy też ID klienta żeby móc wrócić
@@ -1076,9 +1147,9 @@ function showV(v,opts){
   }
   document.querySelectorAll(".vw").forEach(e=>e.classList.remove("on"));
   document.querySelectorAll(".nav button[data-v]").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
-  const map={consent:"vConsent",clients:"vClients",detail:"vDetail",calendar:"vCal",stats:"vStats",settings:"vSettings",menu:"vMenu"};
+  const map={consent:"vConsent",clients:"vClients",detail:"vDetail",calendar:"vCal",stats:"vStats",settings:"vSettings",menu:"vMenu",stock:"vStock"};
   document.getElementById(map[v]||"vConsent").classList.add("on");
-  if(v==="clients")loadCl();if(v==="calendar")renderCal();if(v==="stats")renderStats();if(v==="menu")renderMenuList();
+  if(v==="clients")loadCl();if(v==="calendar")renderCal();if(v==="stats")renderStats();if(v==="menu")renderMenuList();if(v==="stock")renderStock();
   updBackBtn();
 }
 
@@ -1282,7 +1353,13 @@ function renderForm(){
   h+='<div id="cosmoP" style="display:none"><div class="cd"><div class="ct">Panel kosmetologa — '+esc(cur.name)+'</div>';
   h+='<div class="fr"><div class="fl"><label>Data zabiegu</label><input type="date" id="fDt" value="'+new Date().toISOString().split("T")[0]+'"></div><div class="fl"><label>Parametry</label><input type="text" id="fPr"></div></div>';
   h+='<div class="fr f1"><div class="fl"><label>Uwagi</label><textarea id="fNo" rows="2" style="resize:vertical"></textarea></div></div>';
-  h+='<div style="margin-top:6px;font:500 10px var(--fb);color:var(--t2);text-transform:uppercase;margin-bottom:4px">Zdjęcia</div>';
+  // ===== UPSELLING: Zalecane produkty do domu =====
+  // Sekcja pokazuje listę produktów retail z magazynu — kosmetolog klika co rekomenduje,
+  // produkt zostaje dopisany do rachunku (con.recommendedProducts) i zdjęty ze stanu przy zapisie.
+  h+='<div class="ct" style="margin-top:10px;font-size:11px;display:flex;justify-content:space-between;align-items:center">🛍 Zalecane produkty do domu <button class="b b1 bsm" onclick="openUpsellPicker()" style="margin:0">➕ Dobierz produkty</button></div>';
+  h+='<div id="upsellList" style="min-height:40px;border:1px dashed var(--bd);border-radius:var(--rs);padding:8px;font:300 10px var(--fb);color:var(--t2);background:var(--bg2)">Brak. Kliknij "➕ Dobierz produkty" aby polecić klientowi kosmetyki do pielęgnacji domowej.</div>';
+  h+='<div id="upsellTotal" style="display:none;font:600 12px var(--fb);margin-top:4px;text-align:right;color:var(--sc)"></div>';
+  h+='<div style="margin-top:10px;font:500 10px var(--fb);color:var(--t2);text-transform:uppercase;margin-bottom:4px">Zdjęcia</div>';
   h+='<div class="pg"><div class="pb" id="pb_before"><div style="display:flex;gap:4px"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'before\')">📸</button><button class="b b2 bsm" onclick="event.stopPropagation();fallbackFile(\'before\')">📁</button></div><div class="pl">PRZED</div><input type="file" accept="image/*" capture="environment" onchange="photoUp(\'before\',this)"></div>';
   h+='<div class="pb" id="pb_after"><div style="display:flex;gap:4px"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'after\')">📸</button><button class="b b2 bsm" onclick="event.stopPropagation();fallbackFile(\'after\')">📁</button></div><div class="pl">PO</div><input type="file" accept="image/*" capture="environment" onchange="photoUp(\'after\',this)"></div></div>';
   h+='<div class="pcmp" id="pcmp"></div>';
@@ -1356,7 +1433,105 @@ function sendRecsEmail(){
   body+="\nKontakt: 503 672 015\nGabinet Kosmetologiczny Magda Mączyńska\nul. Okrąg 46, 87-600 Lipno";
   window.open("mailto:"+email+"?subject="+encodeURIComponent("Zalecenia pozabiegowe — "+cur.name)+"&body="+encodeURIComponent(body));
 }
-function showStep2(){document.getElementById("handover").style.display="none";document.getElementById("cosmoP").style.display="block";document.getElementById("cosmoP").scrollIntoView({behavior:"smooth"});}
+function showStep2(){document.getElementById("handover").style.display="none";document.getElementById("cosmoP").style.display="block";document.getElementById("cosmoP").scrollIntoView({behavior:"smooth"});window._upsellPicked=[];renderUpsellList();}
+
+// ===== UPSELLING W ZAKOŃCZENIU ZABIEGU =====
+// _upsellPicked: [{productId, name, retail_price, qty, size, notes}]
+
+window._upsellPicked=window._upsellPicked||[];
+
+function renderUpsellList(){
+  const box=document.getElementById("upsellList");
+  const totalDiv=document.getElementById("upsellTotal");
+  if(!box)return;
+  const items=window._upsellPicked||[];
+  if(!items.length){
+    box.innerHTML='Brak. Kliknij "➕ Dobierz produkty" aby polecić klientowi kosmetyki do pielęgnacji domowej.';
+    if(totalDiv)totalDiv.style.display="none";
+    return;
+  }
+  let h='';let total=0;
+  items.forEach((it,i)=>{
+    const line=(+it.retail_price||0)*(+it.qty||1);total+=line;
+    h+='<div style="display:flex;gap:6px;align-items:center;padding:4px 0;border-bottom:1px dashed var(--bd);font:400 11px var(--fb)">';
+    h+='<div style="flex:1"><strong>'+esc(it.name)+'</strong>'+(it.size?' <span style="color:var(--t2)">('+esc(it.size)+')</span>':"")+'</div>';
+    h+='<div>'+(it.retail_price||0).toFixed(2)+' × <input type="number" value="'+(it.qty||1)+'" min="1" step="1" style="width:50px;font:400 11px var(--fb)" onchange="_upsellSetQty('+i+',this.value)"></div>';
+    h+='<div style="font:600 11px var(--fb);min-width:70px;text-align:right">'+line.toFixed(2)+' zł</div>';
+    h+='<button class="b bd bsm" onclick="_upsellRemove('+i+')">✕</button>';
+    h+='</div>';
+  });
+  box.innerHTML=h;
+  if(totalDiv){
+    totalDiv.style.display="block";
+    totalDiv.textContent="Razem: "+total.toFixed(2)+" zł";
+  }
+}
+
+function _upsellSetQty(i,v){if(window._upsellPicked&&window._upsellPicked[i]){window._upsellPicked[i].qty=Math.max(1,+v||1);renderUpsellList();}}
+function _upsellRemove(i){if(window._upsellPicked){window._upsellPicked.splice(i,1);renderUpsellList();}}
+
+async function openUpsellPicker(){
+  const all=await dbGetAll("products");
+  // Tylko retail i both, z ustawioną ceną odsprzedaży
+  const available=all.filter(p=>(p.kind==="retail"||p.kind==="both")&&(+p.retail_price>0));
+  if(!available.length){
+    toast("Brak produktów do odsprzedaży w bazie. Dodaj je w zakładce 📦 Magazyn.");
+    return;
+  }
+  // Inteligentne sortowanie: najpierw produkty pasujące do aktualnego zabiegu (po kategorii/marce), reszta alfabetycznie
+  const curCat=cur?.name||"";
+  const pickedIds=new Set((window._upsellPicked||[]).map(x=>x.productId));
+  available.sort((a,b)=>{
+    // Najpierw ta sama marka co w zabiegu jeśli zabieg zawiera markę w nazwie
+    const curL=curCat.toLowerCase();
+    const aBrandMatch=a.brand&&curL.includes(a.brand.toLowerCase())?1:0;
+    const bBrandMatch=b.brand&&curL.includes(b.brand.toLowerCase())?1:0;
+    if(aBrandMatch!==bBrandMatch)return bBrandMatch-aBrandMatch;
+    return (a.name||"").localeCompare(b.name||"","pl");
+  });
+  let h='<h3>🛍 Dobierz produkty do pielęgnacji domowej</h3>';
+  h+='<div class="db" style="background:var(--sb);border-left-color:var(--sc);font:400 10px var(--fb)">Zabieg: <strong>'+esc(cur?.name||"?")+'</strong>. Kliknij produkt aby dodać do rachunku. Produkty zostaną zdjęte ze stanu magazynowego po zapisaniu zabiegu.</div>';
+  h+='<input type="text" id="upsSrch" placeholder="🔍 Szukaj produktu..." style="margin-bottom:8px" oninput="_renderUpsellChoices()">';
+  h+='<div id="upsChoices" style="max-height:400px;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--rs);background:var(--c)"></div>';
+  h+='<div class="brow" style="margin-top:10px"><button class="b bs" onclick="closeMo()">✓ Gotowe</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+  window._upsellChoices=available;
+  _renderUpsellChoices();
+}
+
+function _renderUpsellChoices(){
+  const q=((document.getElementById("upsSrch")||{}).value||"").toLowerCase().trim();
+  const box=document.getElementById("upsChoices");if(!box)return;
+  const pickedIds=new Set((window._upsellPicked||[]).map(x=>x.productId));
+  let list=window._upsellChoices||[];
+  if(q)list=list.filter(p=>((p.name||"")+" "+(p.brand||"")+" "+(p.category||"")).toLowerCase().includes(q));
+  if(!list.length){box.innerHTML='<div style="padding:10px;color:var(--t2);font:400 11px var(--fb)">Brak pasujących produktów.</div>';return;}
+  let h='';
+  list.forEach(p=>{
+    const already=pickedIds.has(p.id);
+    const stock=+p.stock||0;
+    const lowStock=stock<=0;
+    h+='<div style="padding:8px;border-bottom:1px solid var(--bd);display:flex;gap:8px;align-items:center'+(already?';opacity:.5':"")+'">';
+    h+='<div style="flex:1"><div style="font:600 12px var(--fb)">'+esc(p.name)+(p.brand?' <span style="color:var(--t2);font-weight:300">·'+esc(p.brand)+'</span>':"")+'</div>';
+    h+='<div style="font:300 10px var(--fb);color:var(--t2)">'+esc(p.size||"")+' · stan: '+(lowStock?'<span style="color:var(--dn)">0 ⚠</span>':stock)+' szt.</div></div>';
+    h+='<div style="font:700 13px var(--fb);min-width:70px;text-align:right">'+(+p.retail_price).toFixed(2)+' zł</div>';
+    if(already)h+='<span style="color:var(--sc);font:600 11px var(--fb)">✓ dodany</span>';
+    else h+='<button class="b bs bsm" onclick="_upsellAdd('+p.id+')">➕ Dodaj</button>';
+    h+='</div>';
+  });
+  box.innerHTML=h;
+}
+
+function _upsellAdd(productId){
+  const p=(window._upsellChoices||[]).find(x=>x.id===productId);if(!p)return;
+  if(!window._upsellPicked)window._upsellPicked=[];
+  // Nie dodawaj dwa razy tego samego
+  if(window._upsellPicked.some(x=>x.productId===productId)){toast("Już dodany");return;}
+  window._upsellPicked.push({productId:p.id,name:p.name,brand:p.brand,retail_price:p.retail_price,qty:1,size:p.size,notes:p.notes});
+  _renderUpsellChoices();
+  toast("+ "+p.name);
+}
 
 async function cosmoSave(){
   if(!db||!savedConId)return;
@@ -1366,12 +1541,57 @@ async function cosmoSave(){
   con.date=document.getElementById("fDt")?.value||"";
   con.photoBefore=photos.before;con.photoAfter=photos.after;
   con.cosmoTs=new Date().toISOString();
+  // Zapisz rekomendowane produkty + zdejmij ze stanu
+  const picked=window._upsellPicked||[];
+  if(picked.length){
+    con.recommendedProducts=picked.map(p=>({productId:p.productId,name:p.name,brand:p.brand,retail_price:p.retail_price,qty:p.qty,size:p.size}));
+    con.recommendedTotal=picked.reduce((s,p)=>s+(+p.retail_price||0)*(+p.qty||1),0);
+    // Zdjęcie ze stanu + rejestracja ruchów
+    const products=await dbGetAll("products");
+    for(const it of picked){
+      const prod=products.find(x=>x.id===it.productId);
+      if(!prod)continue;
+      prod.stock=Math.max(0,(+prod.stock||0)-(+it.qty||1));
+      prod.updatedAt=new Date().toISOString();
+      await dbPut("products",prod);
+      await dbAdd("stockMoves",{productId:prod.id,qty:-(it.qty||1),reason:"sprzedaż po zabiegu",appointmentId:null,consentId:savedConId,createdAt:new Date().toISOString()});
+    }
+  }
   await dbPut("consents",con);
   supaUpsert("consents",con);
-  toast("Zapisano ✓");
+  // Email z instrukcją (mailto — otwiera klient poczty)
+  if(picked.length){
+    const cls=await dbGetAll("clients");const cl=cls.find(c=>c.id===con.clientId);
+    if(cl?.email){
+      setTimeout(()=>{if(confirm("Wysłać do klientki e-mail z informacją o poleconych produktach?"))_sendUpsellEmail(cl,picked,con);},300);
+    }
+  }
+  toast("Zapisano ✓"+(picked.length?" (rachunek: +"+con.recommendedTotal.toFixed(2)+" zł za produkty)":""));
   document.getElementById("step3").style.display="block";
   document.getElementById("step3").scrollIntoView({behavior:"smooth"});
   setTimeout(()=>autoPDF("kompletna"),400);
+}
+
+function _sendUpsellEmail(cl,picked,con){
+  const name=(cl.name||"").split(" ")[0]||"Pani";
+  let body="Dzień dobry "+name+",\n\nDziękujemy za dzisiejszą wizytę! Do pielęgnacji domowej polecamy następujące produkty:\n\n";
+  let total=0;
+  picked.forEach(p=>{
+    const line=(+p.retail_price||0)*(+p.qty||1);total+=line;
+    body+="• "+p.name+(p.size?" ("+p.size+")":"")+" — "+p.qty+" szt × "+(+p.retail_price).toFixed(2)+" zł = "+line.toFixed(2)+" zł\n";
+    if(p.notes)body+="   → "+p.notes+"\n";
+  });
+  body+="\nŁącznie: "+total.toFixed(2)+" zł\n\n";
+  // Instrukcja
+  body+="SPOSÓB STOSOWANIA:\n";
+  body+="Stosuj zgodnie z zaleceniami kosmetologa podczas wizyty. W razie pytań skontaktuj się z gabinetem.\n\n";
+  if(cur?.recommendations_after){
+    body+="ZALECENIA POZABIEGOWE:\n";
+    cur.recommendations_after.slice(0,5).forEach(r=>{body+="• "+r+"\n";});
+    body+="\n";
+  }
+  body+="Zapraszamy na kolejną wizytę!\n\nGabinet Kosmetologiczny Magda Mączyńska\nul. Okrąg 46, 87-600 Lipno\nTel. 503 672 015";
+  window.open("mailto:"+cl.email+"?subject="+encodeURIComponent("Polecane kosmetyki po zabiegu — "+(cur?.name||""))+"&body="+encodeURIComponent(body));
 }
 function newForm(){document.getElementById("tSel").value="";renderForm();window.scrollTo({top:0,behavior:"smooth"});}
 function bookFromStep3(){showV("calendar");}
@@ -1396,7 +1616,7 @@ async function autoPDF(label){
 }
 
 // ===== IndexedDB =====
-function initDB(){const r=indexedDB.open("SalonDB",8);r.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains("clients")){const s=d.createObjectStore("clients",{keyPath:"id",autoIncrement:true});s.createIndex("name","name");s.createIndex("phone","phone");}if(!d.objectStoreNames.contains("consents")){const s=d.createObjectStore("consents",{keyPath:"id",autoIncrement:true});s.createIndex("clientId","clientId");}if(!d.objectStoreNames.contains("appointments")){const s=d.createObjectStore("appointments",{keyPath:"id",autoIncrement:true});s.createIndex("date","date");s.createIndex("clientId","clientId");}if(!d.objectStoreNames.contains("clientPhotos")){const s=d.createObjectStore("clientPhotos",{keyPath:"id",autoIncrement:true});s.createIndex("clientId","clientId");}};r.onsuccess=e=>{db=e.target.result;dbReady=true;};r.onerror=e=>{console.error("DB error",e);};}
+function initDB(){const r=indexedDB.open("SalonDB",9);r.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains("clients")){const s=d.createObjectStore("clients",{keyPath:"id",autoIncrement:true});s.createIndex("name","name");s.createIndex("phone","phone");}if(!d.objectStoreNames.contains("consents")){const s=d.createObjectStore("consents",{keyPath:"id",autoIncrement:true});s.createIndex("clientId","clientId");}if(!d.objectStoreNames.contains("appointments")){const s=d.createObjectStore("appointments",{keyPath:"id",autoIncrement:true});s.createIndex("date","date");s.createIndex("clientId","clientId");}if(!d.objectStoreNames.contains("clientPhotos")){const s=d.createObjectStore("clientPhotos",{keyPath:"id",autoIncrement:true});s.createIndex("clientId","clientId");}if(!d.objectStoreNames.contains("products")){const s=d.createObjectStore("products",{keyPath:"id",autoIncrement:true});s.createIndex("name","name");s.createIndex("kind","kind");s.createIndex("brand","brand");}if(!d.objectStoreNames.contains("stockMoves")){const s=d.createObjectStore("stockMoves",{keyPath:"id",autoIncrement:true});s.createIndex("productId","productId");s.createIndex("appointmentId","appointmentId");}};r.onsuccess=e=>{db=e.target.result;dbReady=true;};r.onerror=e=>{console.error("DB error",e);};}
 function dbGetAll(s){return new Promise(r=>{db.transaction(s,"readonly").objectStore(s).getAll().onsuccess=e=>r(e.target.result);});}
 function dbPut(s,o){return new Promise(r=>{const tx=db.transaction(s,"readwrite");tx.objectStore(s).put(o);tx.oncomplete=()=>r();});}
 function dbAdd(s,o){return new Promise(r=>{const tx=db.transaction(s,"readwrite");const req=tx.objectStore(s).add(o);req.onsuccess=()=>r(req.result);});}
@@ -1656,6 +1876,25 @@ function updBkInfo(){
   panel.innerHTML=h;
 }
 
+// Wspólny helper — zapisuje wizytę lokalnie i próbuje od razu wysłać do chmury
+// Zwraca {ok, cloudOk, aptId}. Daje wyraźny feedback czy sync się udał.
+async function _saveApptAndSync(data){
+  const aptId=await dbAdd("appointments",data);
+  const full={id:aptId,...data};
+  // Natychmiastowy push z await — żeby toast pokazał prawdziwy stan
+  let cloudOk=false;
+  try{
+    const res=await supaUpsert('appointments',full);
+    cloudOk=!!res;
+  }catch(e){console.warn("Sync appt fail:",e);}
+  return{ok:true,cloudOk,aptId};
+}
+function _apptSyncToast(cloudOk,baseMsg){
+  if(!supa||!supaUser||!isOnline){toast(baseMsg+" (📴 offline — tylko lokalnie)");return;}
+  if(cloudOk)toast(baseMsg+" ✓ ☁️ zsynchronizowano");
+  else toast(baseMsg+" ⚠️ zapisano lokalnie, sync NIE powiódł się — sprawdź diagnostykę");
+}
+
 async function confirmBook(date,time){
   const cid=+document.getElementById("bkCl").value;const trIdx=+document.getElementById("bkTr").value;const dur=+document.getElementById("bkDur").value;
   if(!cid){toast("Wybierz klienta z listy");return;}
@@ -1664,9 +1903,9 @@ async function confirmBook(date,time){
   const appts=await dbGetAll("appointments");
   const startMin=parseInt(time.split(":")[0])*60+parseInt(time.split(":")[1]);const endMin=startMin+dur;
   if(appts.some(a=>{if(a.date!==date)return false;const s=parseInt(a.time.split(":")[0])*60+parseInt(a.time.split(":")[1]);const e=s+(a.duration||60);return startMin<e&&endMin>s;})){toast("Konflikt — termin zajęty!");return;}
-  const aptId=await dbAdd("appointments",{clientId:cid,date,time,treatment:trName,price,duration:dur,createdAt:new Date().toISOString()});
-  supaUpsert('appointments',{id:aptId,clientId:cid,date,time,treatment:trName,price,duration:dur});
-  closeMo();renderCal();toast("Zarezerwowano ✓");
+  const res=await _saveApptAndSync({clientId:cid,date,time,treatment:trName,price,duration:dur,createdAt:new Date().toISOString()});
+  closeMo();renderCal();updateSyncBadge();
+  _apptSyncToast(res.cloudOk,"Zarezerwowano");
   showBookedModal(cid,date,time,trName,dur,endMin,price);
 }
 
@@ -1678,14 +1917,14 @@ async function confirmBookSMS(date,time){
   const appts=await dbGetAll("appointments");
   const startMin=parseInt(time.split(":")[0])*60+parseInt(time.split(":")[1]);const endMin=startMin+dur;
   if(appts.some(a=>{if(a.date!==date)return false;const s=parseInt(a.time.split(":")[0])*60+parseInt(a.time.split(":")[1]);const e=s+(a.duration||60);return startMin<e&&endMin>s;})){toast("Konflikt!");return;}
-  const aptId=await dbAdd("appointments",{clientId:cid,date,time,treatment:trName,price,duration:dur,createdAt:new Date().toISOString()});
-  supaUpsert('appointments',{id:aptId,clientId:cid,date,time,treatment:trName,price,duration:dur});
+  const res=await _saveApptAndSync({clientId:cid,date,time,treatment:trName,price,duration:dur,createdAt:new Date().toISOString()});
   const cls=await dbGetAll("clients");const cl=cls.find(c=>c.id===cid);
   if(cl?.phone){
     const txt="Dzien dobry "+(cl.name||"").split(" ")[0]+", potwierdzamy rezerwacje: "+trName+" dnia "+date+" o godz. "+time+". Gabinet Magda Maczynska, tel. 503672015. Do zobaczenia!";
     window.open("sms:"+cl.phone+"?body="+encodeURIComponent(txt));
   }
-  closeMo();renderCal();toast("Zarezerwowano + SMS ✓");
+  closeMo();renderCal();updateSyncBadge();
+  _apptSyncToast(res.cloudOk,"Zarezerwowano + SMS");
 }
 
 // Rezerwacja + SMS z informacją o dacie I zaleceniami PRZED zabiegiem
@@ -2441,6 +2680,400 @@ async function deleteClientPhoto(photoId,cid){
   await dbDel("clientPhotos",photoId);
   toast("Usunięto ✓");
   renderClientGallery(cid);
+}
+
+// ============== MAGAZYN / BAZA PRODUKTÓW ==============
+// Rekord w products: {id, name, brand, category, kind ('usable' | 'retail' | 'both'),
+//   purchase_price (PLN — koszt dla gabinetu), retail_price (PLN — cena sprzedaży klientowi),
+//   unit (ml/szt/g), size (string np. "50 ml"), stock (liczba sztuk na stanie),
+//   min_stock (próg alarmu), barcode, notes, createdAt, updatedAt}
+// kind:
+//   usable  — materiał zużywalny (rękawiczki, kartridże, ampułki w zabiegu)
+//   retail  — tylko do odsprzedaży klientowi
+//   both    — kosmetyk używany w zabiegach I sprzedawany (np. krem estGen)
+// stockMoves rejestruje ruchy (IN/OUT): {productId, qty (+/-), reason, appointmentId, createdAt}
+
+let _stockTab="usable"; // aktualnie wybrana zakładka
+
+function switchStockTab(t){
+  _stockTab=t;
+  document.querySelectorAll("[data-stock-tab]").forEach(b=>{
+    b.classList.toggle("b1",b.dataset.stockTab===t);
+    b.classList.toggle("b2",b.dataset.stockTab!==t);
+  });
+  renderStock();
+}
+
+async function renderStock(){
+  const content=document.getElementById("stockContent");
+  const summary=document.getElementById("stockSummary");
+  if(!content)return;
+  // Aktywna zakładka na początku
+  document.querySelectorAll("[data-stock-tab]").forEach(b=>{
+    b.classList.toggle("b1",b.dataset.stockTab===_stockTab);
+    b.classList.toggle("b2",b.dataset.stockTab!==_stockTab);
+  });
+  const all=await dbGetAll("products");
+  const q=((document.getElementById("stockSrch")||{}).value||"").toLowerCase().trim();
+  // Podsumowanie — niezależnie od zakładki
+  const valPurchase=all.reduce((s,p)=>s+(+p.purchase_price||0)*(+p.stock||0),0);
+  const valRetail=all.reduce((s,p)=>s+(+p.retail_price||0)*(+p.stock||0),0);
+  const low=all.filter(p=>(+p.stock||0)<(+p.min_stock||0)).length;
+  summary.innerHTML=
+    '<div style="flex:1;min-width:120px;padding:8px;background:var(--bg2);border-radius:var(--rs);font:400 11px var(--fb)"><div style="font:600 10px var(--fb);color:var(--t2)">Produkty w bazie</div><div style="font:700 18px var(--fb)">'+all.length+'</div></div>'+
+    '<div style="flex:1;min-width:120px;padding:8px;background:var(--bg2);border-radius:var(--rs);font:400 11px var(--fb)"><div style="font:600 10px var(--fb);color:var(--t2)">Wartość zakupowa</div><div style="font:700 18px var(--fb)">'+valPurchase.toFixed(0)+' zł</div></div>'+
+    '<div style="flex:1;min-width:120px;padding:8px;background:var(--bg2);border-radius:var(--rs);font:400 11px var(--fb)"><div style="font:600 10px var(--fb);color:var(--t2)">Wartość sprzedażowa</div><div style="font:700 18px var(--fb)">'+valRetail.toFixed(0)+' zł</div></div>'+
+    (low?'<div style="flex:1;min-width:120px;padding:8px;background:var(--db);border-radius:var(--rs);font:400 11px var(--fb);border-left:3px solid var(--dn)"><div style="font:600 10px var(--fb);color:var(--dn)">⚠ Poniżej progu</div><div style="font:700 18px var(--fb)">'+low+'</div></div>':"");
+  // Filtrowanie wg zakładki
+  let list=all.slice();
+  if(_stockTab==="usable")list=list.filter(p=>p.kind==="usable"||p.kind==="both");
+  else if(_stockTab==="retail")list=list.filter(p=>p.kind==="retail"||p.kind==="both");
+  // dla zakładki "prices" pokazujemy wszystko które ma retail_price
+  else if(_stockTab==="prices")list=list.filter(p=>p.retail_price>0);
+  if(q)list=list.filter(p=>((p.name||"")+" "+(p.brand||"")+" "+(p.category||"")).toLowerCase().includes(q));
+  // Sortowanie
+  list.sort((a,b)=>{
+    const ca=(a.category||"ZZZ").localeCompare(b.category||"ZZZ","pl");
+    if(ca!==0)return ca;
+    return (a.name||"").localeCompare(b.name||"","pl");
+  });
+  if(!list.length){
+    content.innerHTML='<div class="db" style="background:var(--bg2);text-align:center">Brak produktów w tej kategorii. Dodaj ręcznie przyciskiem ➕ albo wczytaj cennik z 📥.</div>';
+    return;
+  }
+  // Grupuj po kategorii
+  const groups={};list.forEach(p=>{const g=p.category||"(bez kategorii)";if(!groups[g])groups[g]=[];groups[g].push(p);});
+  let h="";
+  for(const gName of Object.keys(groups)){
+    h+='<div style="margin-top:10px"><div class="ct" style="font-size:11px">'+esc(gName)+' <span style="color:var(--t2);font-weight:300">('+groups[gName].length+')</span></div>';
+    h+='<div style="border:1px solid var(--bd);border-radius:var(--rs);background:var(--c)">';
+    groups[gName].forEach(p=>{
+      const stock=+p.stock||0;const minS=+p.min_stock||0;
+      const low=stock<minS;
+      const pPrice=p.purchase_price!=null?(+p.purchase_price).toFixed(2)+" zł":"—";
+      const rPrice=p.retail_price!=null?(+p.retail_price).toFixed(2)+" zł":"—";
+      const margin=(p.purchase_price&&p.retail_price)?((p.retail_price-p.purchase_price)/p.retail_price*100).toFixed(0)+"%":"—";
+      h+='<div style="padding:8px;border-bottom:1px solid var(--bd);display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">';
+      h+='<div style="flex:1;min-width:180px">';
+      h+='<div style="font:600 12px var(--fb)">'+esc(p.name||"(bez nazwy)")+(p.brand?' <span style="color:var(--t2);font-weight:300">·'+esc(p.brand)+'</span>':"")+'</div>';
+      h+='<div style="font:300 10px var(--fb);color:var(--t2)">'+esc(p.size||"")+(p.notes?" · "+esc(p.notes.substring(0,60)):"")+'</div>';
+      h+='</div>';
+      if(_stockTab==="prices"){
+        // Zakładka cen — prezentacyjnie (duże, czytelne), np. żeby pokazać klientowi
+        h+='<div style="min-width:140px;text-align:right"><div style="font:600 10px var(--fb);color:var(--t2)">Cena dla klienta</div><div style="font:700 16px var(--fb);color:var(--sc)">'+rPrice+'</div></div>';
+      }else{
+        h+='<div style="min-width:80px;text-align:right;font:500 11px var(--fb)"><div style="color:var(--t2);font:400 9px var(--fb)">Zakup</div>'+pPrice+'</div>';
+        h+='<div style="min-width:80px;text-align:right;font:500 11px var(--fb)"><div style="color:var(--t2);font:400 9px var(--fb)">Sprzedaż</div>'+rPrice+'</div>';
+        h+='<div style="min-width:50px;text-align:right;font:500 11px var(--fb);color:var(--g)"><div style="color:var(--t2);font:400 9px var(--fb)">Marża</div>'+margin+'</div>';
+        h+='<div style="min-width:90px;text-align:center"><div style="color:var(--t2);font:400 9px var(--fb)">Stan</div><div style="font:700 14px var(--fb);color:'+(low?'var(--dn)':'var(--t)')+'">'+stock+' szt.</div>';
+        h+='<div class="brow" style="margin-top:2px;justify-content:center;gap:2px"><button class="b b2 bsm" onclick="adjustStock('+p.id+',-1)" title="Zmniejsz stan o 1">−</button><button class="b b2 bsm" onclick="adjustStock('+p.id+',1)" title="Zwiększ stan o 1">+</button></div></div>';
+      }
+      h+='<div class="brow" style="margin:0"><button class="b b1 bsm" onclick="openStockForm('+p.id+')">✏️</button><button class="b bd bsm" onclick="deleteStockItem('+p.id+')">🗑</button></div>';
+      h+='</div>';
+    });
+    h+='</div></div>';
+  }
+  content.innerHTML=h;
+}
+
+// Dodanie/edycja produktu — modal
+async function openStockForm(productId){
+  let p={name:"",brand:"",category:"",kind:"usable",purchase_price:"",retail_price:"",unit:"szt",size:"",stock:0,min_stock:0,notes:""};
+  let editing=false;
+  if(productId){
+    const all=await dbGetAll("products");const ex=all.find(x=>x.id===productId);
+    if(ex){p=ex;editing=true;}
+  }
+  let h='<h3>'+(editing?"✏️ Edycja produktu":"➕ Nowy produkt w magazynie")+'</h3>';
+  h+='<div class="fr"><div class="fl"><label>Nazwa *</label><input type="text" id="stF_name" value="'+esc(p.name||"")+'" placeholder="np. Płyn oczyszczający"></div>';
+  h+='<div class="fl"><label>Marka</label><input type="text" id="stF_brand" value="'+esc(p.brand||"")+'" placeholder="np. estGen"></div></div>';
+  h+='<div class="fr"><div class="fl"><label>Kategoria</label><input type="text" id="stF_cat" value="'+esc(p.category||"")+'" placeholder="np. Kremy pielęgnacyjne" list="stockCatList"><datalist id="stockCatList"><option value="Oczyszczanie"><option value="Złuszczające"><option value="Aktywne"><option value="SOS"><option value="Specjalistyczne"><option value="Kremy"><option value="Zużywalne - dermapen"><option value="Zużywalne - jednorazowe"><option value="Zużywalne - piercing"><option value="Zużywalne - kosmetyka"></datalist></div>';
+  h+='<div class="fl"><label>Rodzaj *</label><select id="stF_kind"><option value="usable"'+(p.kind==="usable"?" selected":"")+'>🧪 Zużywalny w gabinecie</option><option value="retail"'+(p.kind==="retail"?" selected":"")+'>🛍 Tylko do odsprzedaży</option><option value="both"'+(p.kind==="both"?" selected":"")+'>🔄 Oba (zużywam + sprzedaję)</option></select></div></div>';
+  h+='<div class="fr"><div class="fl"><label>Cena zakupu dla gabinetu (PLN)</label><input type="number" id="stF_pp" value="'+(p.purchase_price||"")+'" step="0.01" min="0" placeholder="np. 109"></div>';
+  h+='<div class="fl"><label>Cena sprzedaży klientowi (PLN)</label><input type="number" id="stF_rp" value="'+(p.retail_price||"")+'" step="0.01" min="0" placeholder="np. 149"></div></div>';
+  h+='<div class="fr"><div class="fl"><label>Pojemność / rozmiar</label><input type="text" id="stF_size" value="'+esc(p.size||"")+'" placeholder="np. 150 ml"></div>';
+  h+='<div class="fl"><label>Jednostka</label><select id="stF_unit"><option value="szt"'+(p.unit==="szt"?" selected":"")+'>szt</option><option value="ml"'+(p.unit==="ml"?" selected":"")+'>ml</option><option value="g"'+(p.unit==="g"?" selected":"")+'>g</option><option value="op"'+(p.unit==="op"?" selected":"")+'>op.</option></select></div></div>';
+  h+='<div class="fr"><div class="fl"><label>Stan magazynowy (szt.)</label><input type="number" id="stF_stock" value="'+(p.stock||0)+'" step="1" min="0"></div>';
+  h+='<div class="fl"><label>Próg alarmowy (szt.)</label><input type="number" id="stF_min" value="'+(p.min_stock||0)+'" step="1" min="0" placeholder="np. 2"></div></div>';
+  h+='<div class="fl"><label>Notatki (skład, wskazania, dostawca...)</label><textarea id="stF_notes" rows="2">'+esc(p.notes||"")+'</textarea></div>';
+  h+='<div class="brow" style="margin-top:10px"><button class="b bs" onclick="saveStockItem('+(productId||"null")+')">💾 Zapisz</button><button class="b b2" onclick="closeMo()">Anuluj</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+}
+
+async function saveStockItem(productId){
+  const g=id=>(document.getElementById(id)?.value||"").trim();
+  const gn=id=>{const v=g(id);return v===""?null:+v;};
+  const name=g("stF_name");if(!name){toast("Nazwa jest wymagana");return;}
+  const rec={
+    name,brand:g("stF_brand"),category:g("stF_cat"),kind:g("stF_kind")||"usable",
+    purchase_price:gn("stF_pp"),retail_price:gn("stF_rp"),
+    size:g("stF_size"),unit:g("stF_unit")||"szt",
+    stock:+g("stF_stock")||0,min_stock:+g("stF_min")||0,
+    notes:g("stF_notes"),updatedAt:new Date().toISOString()
+  };
+  if(productId){
+    const all=await dbGetAll("products");const ex=all.find(x=>x.id===productId);
+    if(ex){Object.assign(ex,rec);await dbPut("products",ex);}
+  }else{
+    rec.createdAt=new Date().toISOString();
+    await dbAdd("products",rec);
+  }
+  closeMo();toast("Zapisano ✓");renderStock();
+}
+
+async function deleteStockItem(productId){
+  if(!confirm("Usunąć produkt z bazy? Historia ruchów magazynowych pozostanie."))return;
+  await dbDel("products",productId);
+  toast("Usunięto ✓");renderStock();
+}
+
+// Szybka korekta stanu o ±1 z rejestracją ruchu
+async function adjustStock(productId,delta){
+  const all=await dbGetAll("products");const p=all.find(x=>x.id===productId);
+  if(!p)return;
+  const newStock=Math.max(0,(+p.stock||0)+delta);
+  p.stock=newStock;p.updatedAt=new Date().toISOString();
+  await dbPut("products",p);
+  await dbAdd("stockMoves",{productId,qty:delta,reason:delta>0?"korekta +":"korekta -",createdAt:new Date().toISOString()});
+  renderStock();
+}
+
+// Eksport magazynu do CSV — do księgowości / inwentaryzacji
+async function exportStockCSV(){
+  const all=await dbGetAll("products");
+  const rows=[["Nazwa","Marka","Kategoria","Rodzaj","Pojemność","Jedn.","Stan","Próg min.","Cena zakupu","Cena sprzedaży","Wartość zakup","Wartość sprzedaż","Notatki"]];
+  all.forEach(p=>{
+    const vp=(+p.purchase_price||0)*(+p.stock||0);
+    const vr=(+p.retail_price||0)*(+p.stock||0);
+    rows.push([p.name||"",p.brand||"",p.category||"",p.kind||"",p.size||"",p.unit||"",p.stock||0,p.min_stock||0,p.purchase_price||"",p.retail_price||"",vp.toFixed(2),vr.toFixed(2),p.notes||""]);
+  });
+  const csv=rows.map(r=>r.map(v=>{const s=String(v??"");return /[",;\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(";")).join("\n");
+  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download="Magazyn_"+new Date().toISOString().split("T")[0]+".csv";a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),100);
+  toast("CSV pobrany ✓");
+}
+
+// Wczytanie cennika z pliku — 2 opcje: estGen (wbudowany) albo własny CSV/XLSX
+async function showStockImportModal(){
+  let h='<h3>📥 Wczytaj cennik do magazynu</h3>';
+  h+='<div class="db" style="background:var(--wb);border-left-color:var(--wn);font:400 10px var(--fb)">Wybierz źródło. Istniejące produkty o tej samej nazwie + marce zostaną zaktualizowane (ceny + pojemność), stan magazynowy nie jest zmieniany.</div>';
+  h+='<div class="fl"><label>Szybki import wbudowanych katalogów</label>';
+  h+='<div class="brow"><button class="b b1 bsm" onclick="importEstGenCatalog()">🌸 Katalog estGen (37 produktów)</button>';
+  h+='<button class="b b1 bsm" onclick="importAllegroProducts()">📦 Zakupy Allegro (ok. 200 poz.)</button></div>';
+  h+='</div>';
+  h+='<div class="fl" style="margin-top:10px"><label>Albo wczytaj własny plik CSV/XLSX (kolumny: Nazwa, Marka, Kategoria, Cena zakupu, Cena sprzedaży, Pojemność, Stan)</label>';
+  h+='<input type="file" id="stockFile" accept=".csv,.xlsx,.xls" onchange="importStockFromFile(this)"></div>';
+  h+='<div class="brow" style="margin-top:10px"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+}
+
+// Wbudowany katalog estGen — 37 wariantów cenowych z PDF
+const ESTGEN_CATALOG=[
+  // OCZYSZCZANIE I PŁYNY TERAPEUTYCZNE (ceny zakupowe w kolumnie "zabiegi" + ceny "pielęgnacja domowa" + sugerowana odsprzedaż)
+  ["Płyn oczyszczający 290 ml","estGen","Oczyszczanie i płyny terapeutyczne",109,null,"290 ml","Oczyszczanie + przygotowanie skóry. Pentavitin, kwas mlekowy, betaina."],
+  ["Płyn oczyszczający 140 ml","estGen","Oczyszczanie i płyny terapeutyczne",59,79,"140 ml","Wersja do pielęgnacji domowej."],
+  ["Żywy żel równoważący 150 ml","estGen","Oczyszczanie i płyny terapeutyczne",109,149,"150 ml","Żywe bakterie Lactobacillus salivarius. AZS, ŁZS, łuszczyca, egzema."],
+  ["Płyn tonizujący 290 ml","estGen","Oczyszczanie i płyny terapeutyczne",109,null,"290 ml","Promotor przenikania, głębokie nawilżanie."],
+  ["Płyn tonizujący 140 ml","estGen","Oczyszczanie i płyny terapeutyczne",59,79,"140 ml","Wersja domowa."],
+  ["Płyn aktywny 140 ml","estGen","Oczyszczanie i płyny terapeutyczne",59,79,"140 ml","Zabiegi+dom. Nadtlenek wodoru, srebro koloidalne. Trądzik, blizny."],
+  ["Płyn aktywny plus 140 ml","estGen","Oczyszczanie i płyny terapeutyczne",129,179,"140 ml","Stany zapalne. Kwas laktobionowy, azeloglicyna. Trądzik różowaty."],
+  ["Płyn Dex Stop 140 ml","estGen","Oczyszczanie i płyny terapeutyczne",85,119,"140 ml","Nużeniec. 4-terpineol, totarol, wyciąg z chryzantemy."],
+  ["Szampon równoważący 200 ml","estGen","Oczyszczanie i płyny terapeutyczne",89,119,"200 ml","Dermatozy skóry głowy. ŁZS, AZS, łupież."],
+  // ZŁUSZCZAJĄCE
+  ["Żel kwasowy (zestaw 75+300 ml)","estGen","Preparaty złuszczające",599,null,"75+300 ml","Zabiegowy. Kwas pirogronowy, traneksamowy, mlekowy."],
+  ["Aktywne enzymy 75 ml","estGen","Preparaty złuszczające",199,null,"75 ml","Zabiegowy."],
+  ["Aktywne enzymy 30 ml","estGen","Preparaty złuszczające",99,139,"30 ml","Wersja domowa. Papaina, bromelanina."],
+  ["Płyn Melano Stop 140 ml","estGen","Preparaty złuszczające",129,179,"140 ml","Przebarwienia. Albatin, kwas elagowy."],
+  ["Mineral Mezo Peel 50 ml","estGen","Preparaty złuszczające",349,null,"50 ml","Zabieg. Spongilla spicules 5%, imituje mezoterapię."],
+  ["Mineral Mezo Serum 30 ml","estGen","Preparaty złuszczające",149,209,"30 ml","Dom. Spongilla 0.5%, Tremella fuciformis."],
+  // AKTYWNE
+  ["Żel aktywny 75 ml","estGen","Preparaty aktywne",399,null,"75 ml","Zabieg. Colostrum+laktoferyna, SIG 1459, trądzik."],
+  ["Żel aktywny complex NEURO plus 75 ml","estGen","Preparaty aktywne",499,null,"75 ml","Zabieg. Konopeptyd botox-like, terapia blizn."],
+  ["Żel FOTO zestaw 8x24ml","estGen","Preparaty aktywne",799,null,"8x24 ml","Zabiegi fotodynamiczne. Kwas 5-ALA."],
+  ["Żel FOTO 1x3ml","estGen","Preparaty aktywne",129,null,"3 ml","Pojedyncza aplikacja."],
+  // SOS
+  ["Aktywny koncentrat probiotyczny 75 ml","estGen","SOS dla skóry",249,null,"75 ml","Zabieg. Probiotyki, skóra sucha, alergia."],
+  ["Aktywny koncentrat probiotyczny 30 ml","estGen","SOS dla skóry",109,149,"30 ml","Dom."],
+  ["Aktywny koncentrat peptydowy 75 ml","estGen","SOS dla skóry",249,null,"75 ml","Zabieg. Neuropeptydy, rumień, alergia."],
+  ["Aktywny koncentrat peptydowy 30 ml","estGen","SOS dla skóry",109,149,"30 ml","Dom."],
+  ["Żywa maska 75 ml","estGen","SOS dla skóry",259,null,"75 ml","Zabieg. Lactobacillus rhamnosus."],
+  ["Żywa maska 15 ml","estGen","SOS dla skóry",69,99,"15 ml","Dom."],
+  ["Neuro lifting krem 50 ml","estGen","SOS dla skóry",169,229,"50 ml","Zabieg+dom. Tripeptide-2, anti-aging."],
+  ["Neuro lifting maska 75 ml","estGen","SOS dla skóry",249,349,"75 ml","Zabieg+dom. Chlorella emersonii."],
+  // SPECJALISTYCZNE
+  ["Hydro serum 75 ml","estGen","Preparaty specjalistyczne",249,null,"75 ml","Zabieg. Biosaccharide gum-1, sirtuina 1."],
+  ["Hydro serum 30 ml","estGen","Preparaty specjalistyczne",109,149,"30 ml","Dom."],
+  ["Epi serum 75 ml","estGen","Preparaty specjalistyczne",249,null,"75 ml","Zabieg. RoyalEpigen P5, mleczko pszczele."],
+  ["Epi serum 30 ml","estGen","Preparaty specjalistyczne",109,149,"30 ml","Dom."],
+  ["Aktywny płat kosmetyczny 5 szt","estGen","Preparaty specjalistyczne",229,null,"5 szt","Maska anti-aging bankietowa. Karcynina, acetyl hexapeptide-8."],
+  ["Aktywna pasta 75 ml","estGen","Preparaty specjalistyczne",269,null,"75 ml","Zabieg. SIG 1459, hinokitiol, trądzik."],
+  ["Aktywna pasta 15 ml","estGen","Preparaty specjalistyczne",75,105,"15 ml","Dom."],
+  ["Aktywny opatrunek kosmetyczny 50 ml","estGen","Preparaty specjalistyczne",219,299,"50 ml","Zabieg+dom. Terapia blizn. Polidimetylosiloksan."],
+  ["Aktywny opatrunek kosmetyczny 15 ml","estGen","Preparaty specjalistyczne",85,119,"15 ml","Dom."],
+  ["Koncentrat Melano Stop 50 ml","estGen","Preparaty specjalistyczne",159,219,"50 ml","Arbutyna, peptyd biomimetyczny."],
+  ["Tarcza Anty oksydant 50 ml","estGen","Preparaty specjalistyczne",169,239,"50 ml","Fuleren C60, 250× silniejszy niż wit. C."],
+  ["Krem do masażu 200 ml","estGen","Preparaty specjalistyczne",129,null,"200 ml","Zabiegowy. Argirelina, kwas hialuronowy."],
+  // KREMY
+  ["Aktywny regenerator kosmetyczny 50 ml","estGen","Kremy pielęgnacyjne",139,189,"50 ml","Halorubin, ceramidy. Skóra sucha, alergia."],
+  ["Aktywator młodości 50 ml","estGen","Kremy pielęgnacyjne",179,249,"50 ml","Karcynina, colostrum. Skóra 35+."],
+  ["Krem wokół oczu 50 ml","estGen","Kremy pielęgnacyjne",219,null,"50 ml","Zabiegowy. Tripeptyd-1 miedzi."],
+  ["Krem wokół oczu 15 ml","estGen","Kremy pielęgnacyjne",85,119,"15 ml","Dom."],
+  ["Krem aktywny 50 ml","estGen","Kremy pielęgnacyjne",109,149,"50 ml","Colostrum, srebro koloidalne. Trądzik, ŁZS."],
+  ["Tarcza Foto SPF 30 150 ml","estGen","Kremy pielęgnacyjne",169,235,"150 ml","Filtry nowej gen. (BEMT, DHHB, EHT). Dla dzieci od 3 r.ż., ciąża OK."],
+  ["Tarcza ochronna 50 ml","estGen","Kremy pielęgnacyjne",129,179,"50 ml","Po słońcu. Alga Laminaria."],
+  ["Lipidowa odbudowa 150 ml","estGen","Kremy pielęgnacyjne",159,219,"150 ml","Skóra sucha, łuszczyca, po depilacji."]
+];
+
+async function importEstGenCatalog(){
+  if(!confirm("Zaimportować 37 produktów estGen do bazy? Istniejące (po nazwie+marce) zostaną zaktualizowane, reszta dodana."))return;
+  const existing=await dbGetAll("products");
+  const byKey={};existing.forEach(p=>{byKey[((p.name||"")+"|"+(p.brand||"")).toLowerCase()]=p;});
+  let added=0,updated=0;
+  for(const [name,brand,cat,purchase,retail,size,notes] of ESTGEN_CATALOG){
+    const key=(name+"|"+brand).toLowerCase();
+    const kind=retail?"both":"usable"; // jeśli ma cenę odsprzedaży → also retail
+    const base={name,brand,category:cat,kind,purchase_price:purchase,retail_price:retail,size,unit:"szt",notes,updatedAt:new Date().toISOString()};
+    if(byKey[key]){
+      const ex=byKey[key];Object.assign(ex,base);
+      await dbPut("products",ex);updated++;
+    }else{
+      await dbAdd("products",{...base,stock:0,min_stock:1,createdAt:new Date().toISOString()});
+      added++;
+    }
+  }
+  closeMo();toast("✓ estGen: dodano "+added+", zaktualizowano "+updated);
+  renderStock();
+}
+
+// Wbudowane zakupy z Allegro — 7 kategorii, top produkty wg wartości zakupów (ostatnie znane ceny zakupowe)
+const ALLEGRO_PRODUCTS=[
+  // Dermapen / mikroigły
+  ["Kartridż RF 49 pin (Aruba)","Allegro","Zużywalne - dermapen/mikroigły",46.99,null,"1 szt","Kartridż RF frakcyjny mikroigłowy, 49 pin"],
+  ["Kartridż RF 49 pin (standard)","Allegro","Zużywalne - dermapen/mikroigły",36.99,null,"1 szt","RF frakcyjny 49 pin, alternatywny dostawca"],
+  ["Kartridż RF 81 pin","Allegro","Zużywalne - dermapen/mikroigły",56.99,null,"1 szt","Większa gęstość — głębokie zabiegi"],
+  ["Kartridż Dr.Pen M8 16-igłowy","Allegro","Zużywalne - dermapen/mikroigły",2.07,null,"1 szt","Tani wkład — podstawowe zabiegi"],
+  ["Kartridż Dr.Pen M8 36-igłowy","Allegro","Zużywalne - dermapen/mikroigły",2.69,null,"1 szt","Gęsta matryca"],
+  ["Kartridż Dr.Pen M8-W A6S 11/16/24/36/42/NANO","Allegro","Zużywalne - dermapen/mikroigły",3.99,null,"1 szt","Uniwersalny — wiele rozmiarów"],
+  ["Kartridż Artmex 12 igłowy","Allegro","Zużywalne - dermapen/mikroigły",9.75,null,"1 szt","Mezoterapia mikroigłowa"],
+  ["Kartridż Artmex M1 makijaż perm.","Allegro","Zużywalne - makijaż permanentny",7.90,null,"1 szt","Paczka 10 szt po 79 zł"],
+  // Rękawiczki, podkłady
+  ["Rękawiczki nitrylowe M niebieskie","Allegro","Zużywalne - jednorazowe",10.99,null,"100 szt","Bezpudrowe, medyczne"],
+  ["Rękawiczki nitrylowe Zarys easyCARE M","Allegro","Zużywalne - jednorazowe",12.03,null,"100 szt","Bezpudrowe"],
+  ["Rękawiczki Pura nitrylowe M","Allegro","Zużywalne - jednorazowe",15.00,null,"100 szt","Mocne, niemieckie"],
+  ["Podkład medyczny Blanco Puro 60cm/50m","Allegro","Zużywalne - jednorazowe",14.90,null,"50 m","Włóknina w rolce na fotel"],
+  ["Chusteczki kosmetyczne włókninowe 25x20","Allegro","Zużywalne - jednorazowe",11.99,null,"100 szt","Do demakijażu"],
+  ["Maska foliowa jednorazowa","Allegro","Zużywalne - jednorazowe",15.00,null,"100 szt","Do masek kosmetycznych SPA"],
+  ["Waciki kosmetyczne Prima Derma","Allegro","Zużywalne - jednorazowe",16.99,null,"1 op.","Płatki bawełniane okrągłe"],
+  // Pilniki
+  ["Pilnik łódka 100/180","Allegro","Zużywalne - kosmetyka",0.65,null,"1 szt","100 szt opakowanie x 64.90"],
+  ["Pilnik łódka 180/240","Allegro","Zużywalne - kosmetyka",0.65,null,"1 szt","100 szt opakowanie x 64.90"],
+  ["Pilnik banan 180/240 zebra","Allegro","Zużywalne - kosmetyka",0.65,null,"1 szt","100 szt opakowanie x 65.00"],
+  ["Pilnik prosty zebra 100/180","Allegro","Zużywalne - kosmetyka",0.65,null,"1 szt","100 szt opakowanie x 64.99"],
+  // Piercing
+  ["Jednorazowy aparat z kolczykiem (nos)","Allegro","Zużywalne - piercing",39.99,null,"1 szt","Przekłucie nosa, sterylny"],
+  ["Kolczyki Studex R210Y cyrkon różowy","Allegro","Zużywalne - piercing",8.99,null,"1 para","Oprawa złota — do przekuwania uszu"],
+  ["Kolczyki Studex Brylant R204Y","Allegro","Zużywalne - piercing",11.85,null,"1 para","Oprawa pełna złota"],
+  ["Kolczyki Studex kulka srebrna R200W","Allegro","Zużywalne - piercing",11.75,null,"1 para","Podstawowe do pierwszego przekłucia"],
+  ["Kolczyki Studex perła czarna (onyx)","Allegro","Zużywalne - piercing",8.99,null,"1 para","Plus seria"],
+  ["Kolczyki Studex kulka złota","Allegro","Zużywalne - piercing",7.50,null,"1 para","Steryl, do pistoletu"],
+  // Gehwol do podologii
+  ["Gehwol Schrunden maść 20 ml","Gehwol","Preparaty kosmetyczne",9.93,null,"20 ml","Na spękane stopy — do zabiegów"],
+  ["Gehwol Schrunden maść 75 ml","Gehwol","Preparaty kosmetyczne",28.49,null,"75 ml","Większa pojemność"],
+  ["Gehwol Schrunden maść 125 ml","Gehwol","Preparaty kosmetyczne",39.85,null,"125 ml","Opakowanie gabinetowe"],
+  // Odzież
+  ["Żakiet medyczny Edora 14 kolorów roz 40","Edora","Odzież gabinetowa",105.00,null,"1 szt","Kosmetyczny, profesjonalny"],
+  ["Żakiet medyczny L","Generic","Odzież gabinetowa",99.99,null,"1 szt","Fartuch kosmetyczny"]
+];
+
+async function importAllegroProducts(){
+  if(!confirm("Zaimportować "+ALLEGRO_PRODUCTS.length+" produktów z zakupów Allegro? Istniejące (po nazwie+marce) zostaną zaktualizowane cenowo, stan magazynowy bez zmian."))return;
+  const existing=await dbGetAll("products");
+  const byKey={};existing.forEach(p=>{byKey[((p.name||"")+"|"+(p.brand||"")).toLowerCase()]=p;});
+  let added=0,updated=0;
+  for(const [name,brand,cat,purchase,retail,size,notes] of ALLEGRO_PRODUCTS){
+    const key=(name+"|"+brand).toLowerCase();
+    const base={name,brand,category:cat,kind:"usable",purchase_price:purchase,retail_price:retail,size,unit:"szt",notes,updatedAt:new Date().toISOString()};
+    if(byKey[key]){
+      const ex=byKey[key];Object.assign(ex,base);await dbPut("products",ex);updated++;
+    }else{
+      await dbAdd("products",{...base,stock:0,min_stock:1,createdAt:new Date().toISOString()});added++;
+    }
+  }
+  closeMo();toast("✓ Allegro: dodano "+added+", zaktualizowano "+updated);
+  renderStock();
+}
+
+// Import własnego pliku CSV/XLSX z cennikiem
+async function importStockFromFile(input){
+  const f=input.files&&input.files[0];if(!f)return;
+  const isCSV=/\.csv$/i.test(f.name);
+  const reader=new FileReader();
+  reader.onerror=()=>{toast("Błąd odczytu pliku");input.value="";};
+  reader.onload=async e=>{
+    try{
+      let rows;
+      if(isCSV){const wb=XLSX.read(e.target.result,{type:"string"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false});}
+      else{const wb=XLSX.read(e.target.result,{type:"array"});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,blankrows:false});}
+      if(!rows||rows.length<2){toast("Plik pusty");input.value="";return;}
+      // Zakładam że 1. wiersz to nagłówki
+      const hd=rows[0].map(s=>String(s||"").toLowerCase().trim());
+      const col={name:-1,brand:-1,cat:-1,pp:-1,rp:-1,size:-1,stock:-1,notes:-1};
+      hd.forEach((h,i)=>{
+        if(/nazwa|name/.test(h)&&col.name<0)col.name=i;
+        else if(/marka|brand|producent/.test(h)&&col.brand<0)col.brand=i;
+        else if(/katego|category/.test(h)&&col.cat<0)col.cat=i;
+        else if(/zakup|purchase|hurt/.test(h)&&col.pp<0)col.pp=i;
+        else if(/sprzeda|retail|detal/.test(h)&&col.rp<0)col.rp=i;
+        else if(/pojemn|rozmiar|size|ml|gram/.test(h)&&col.size<0)col.size=i;
+        else if(/stan|stock|ilosc|ilość|ilo/.test(h)&&col.stock<0)col.stock=i;
+        else if(/notat|opis|notes|uwagi/.test(h)&&col.notes<0)col.notes=i;
+      });
+      if(col.name<0){toast("Brak kolumny 'Nazwa' w nagłówkach");input.value="";return;}
+      const existing=await dbGetAll("products");
+      const byKey={};existing.forEach(p=>{byKey[((p.name||"")+"|"+(p.brand||"")).toLowerCase()]=p;});
+      let added=0,updated=0,skipped=0;
+      for(const r of rows.slice(1)){
+        const name=String(r[col.name]||"").trim();if(!name){skipped++;continue;}
+        const brand=col.brand>=0?String(r[col.brand]||"").trim():"";
+        const rec={
+          name,brand,
+          category:col.cat>=0?String(r[col.cat]||"").trim():"",
+          kind:"usable",
+          purchase_price:col.pp>=0?(+String(r[col.pp]||"").replace(",",".").replace(/[^\d.]/g,"")||null):null,
+          retail_price:col.rp>=0?(+String(r[col.rp]||"").replace(",",".").replace(/[^\d.]/g,"")||null):null,
+          size:col.size>=0?String(r[col.size]||"").trim():"",
+          unit:"szt",
+          stock:col.stock>=0?(+String(r[col.stock]||"").replace(/[^\d.]/g,"")||0):0,
+          min_stock:0,
+          notes:col.notes>=0?String(r[col.notes]||"").trim():"",
+          updatedAt:new Date().toISOString()
+        };
+        if(rec.retail_price)rec.kind="both";
+        const key=(name+"|"+brand).toLowerCase();
+        if(byKey[key]){
+          const ex=byKey[key];
+          // Nie nadpisuj stock - zachowaj inwentaryzację
+          const stockKeep=ex.stock||0;
+          Object.assign(ex,rec);ex.stock=stockKeep;
+          await dbPut("products",ex);updated++;
+        }else{
+          rec.createdAt=new Date().toISOString();
+          await dbAdd("products",rec);added++;
+        }
+      }
+      closeMo();toast("✓ Dodano "+added+", zaktualizowano "+updated+(skipped?", pominięto "+skipped:""));
+      renderStock();
+    }catch(e){
+      console.error("Stock import error:",e);
+      toast("Błąd importu: "+e.message);
+    }
+    input.value="";
+  };
+  if(isCSV)reader.readAsText(f,"UTF-8");else reader.readAsArrayBuffer(f);
 }
 
 // ===== MENU ZABIEGOWE =====
