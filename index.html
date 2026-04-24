@@ -257,8 +257,10 @@
 <div class="ec" data-act="json"><div class="ei">💾</div><div class="et">Backup</div></div>
 <div class="ec" data-act="vcf"><div class="ei">👤</div><div class="et">vCard</div></div>
 <div class="ec" data-act="import"><div class="ei">📥</div><div class="et">Import</div></div>
+<div class="ec" data-act="importxlsx"><div class="ei">📑</div><div class="et">Import XLS</div></div>
+<div class="ec" data-act="unknown"><div class="ei">📞</div><div class="et">Do zidentyfikowania</div></div>
 <div class="ec" data-act="crm"><div class="ei">🚀</div><div class="et">Booksy</div></div>
-</div><input type="file" id="impF" accept=".json" style="display:none"></div></div>
+</div><input type="file" id="impF" accept=".json" style="display:none"><input type="file" id="impXF" accept=".xlsx,.xls,.csv" style="display:none"></div></div>
 
 <div id="vDetail" class="vw"><div class="cd"><div id="detC"></div></div></div>
 
@@ -360,6 +362,7 @@
 </div>
 <div id="toast" class="toast"></div>
 <div id="modal" class="mo"><div class="mod" id="modC"></div></div>
+<div id="daypeek" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.55);padding:20px;overflow:auto"><div style="max-width:760px;margin:0 auto;background:var(--c);border-radius:var(--rs);padding:14px 12px;box-shadow:0 6px 24px rgba(0,0,0,.3)" id="daypeekC"></div></div>
 <div id="lb" class="lb"><img id="lbI" src=""></div>
 
 <!-- ===== CONSENT TEMPLATES DATA ===== -->
@@ -1014,11 +1017,13 @@ document.addEventListener("DOMContentLoaded",()=>{
   document.querySelectorAll(".nav button[data-v]").forEach(b=>b.addEventListener("click",()=>showV(b.dataset.v)));
   document.querySelectorAll(".ec[data-act]").forEach(el=>el.addEventListener("click",()=>{
     const a=el.dataset.act;
-    ({xlsx:expXLSX,csv:expCSV,json:expJSON,vcf:expVCF,crm:showCRM}[a]||function(){})();
+    ({xlsx:expXLSX,csv:expCSV,json:expJSON,vcf:expVCF,crm:showCRM,unknown:showUnknownPhones}[a]||function(){})();
     if(a==="import")document.getElementById("impF").click();
+    if(a==="importxlsx")document.getElementById("impXF").click();
   }));
   document.getElementById("impF").addEventListener("change",impJSON);
   const imp2=document.getElementById("impF2");if(imp2)imp2.addEventListener("change",impJSON);
+  const impX=document.getElementById("impXF");if(impX)impX.addEventListener("change",impXLSX);
   // FIX: Modal zamykaj TYLKO gdy mousedown i mouseup/click są oba na tle.
   // Wcześniejsza wersja zamykała modal gdy user kliknął w input i odruchowo
   // przeciągnął mysz poza modal — to psuło wypełnianie formularza rezerwacji.
@@ -2497,7 +2502,290 @@ async function expCSV(){const cls=await dbGetAll("clients"),cons=await dbGetAll(
 async function expJSON(){const d={v:8,date:new Date().toISOString(),clients:await dbGetAll("clients"),consents:await dbGetAll("consents"),appointments:await dbGetAll("appointments")};dl(JSON.stringify(d,null,2),"Backup_"+new Date().toISOString().split("T")[0]+".json","application/json");toast("Backup ✓");}
 async function expVCF(){const cls=await dbGetAll("clients");let v="";cls.forEach(c=>{const p=(c.name||"").split(" "),l=p.pop()||"",f=p.join(" ")||"";v+="BEGIN:VCARD\nVERSION:3.0\nFN:"+c.name+"\nN:"+l+";"+f+";;;\n";if(c.phone)v+="TEL;TYPE=CELL:"+c.phone+"\n";if(c.email)v+="EMAIL:"+c.email+"\n";v+="ORG:Gabinet Magda Maczynska\nEND:VCARD\n";});dl(v,"Kontakty.vcf","text/vcard");toast("vCard ✓");}
 function impJSON(ev){const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=async e=>{try{const d=JSON.parse(e.target.result);if(!d.clients){toast("Zły plik");return;}if(!confirm("Import "+d.clients.length+"?"))return;for(const c of d.clients){delete c.id;await dbAdd("clients",c);}if(d.consents)for(const c of d.consents){delete c.id;await dbAdd("consents",c);}if(d.appointments)for(const a of d.appointments){delete a.id;await dbAdd("appointments",a);}toast("Import ✓");loadCl();}catch(err){toast("Błąd");}};r.readAsText(f);ev.target.value="";}
+
+// ===== IMPORT Z EXCELA / CSV =====
+// Przebieg: (1) parsujemy plik do listy wierszy, (2) zgadujemy kolumny (Imię, Telefon, Email...),
+// (3) pokazujemy modal mapowania kolumn + pole "Źródło kontaktu" + checkbox "klient rozmawiał przez telefon",
+// (4) użytkownik zatwierdza → wpisy trafiają do IDB + Supabase.
+// RODO w praktyce: jeśli nie wiemy skąd numer, wpadają do bazy z flagą marketingConsent=false i
+// notatką źródła. Dla masowego SMS trzeba mieć marketingConsent=true — tylko wtedy mogą iść.
+
+let _impRows=null;let _impHeaders=null;
+function impXLSX(ev){
+  const f=ev.target.files&&ev.target.files[0];if(!f)return;
+  const isCSV=/\.csv$/i.test(f.name);
+  const reader=new FileReader();
+  reader.onerror=()=>{toast("Błąd odczytu pliku");ev.target.value="";};
+  reader.onload=e=>{
+    try{
+      let rows;
+      if(isCSV){
+        // CSV: użyjemy XLSX (który to też obsługuje) — prostsze niż własny parser (cudzysłowy, przecinki w wartościach)
+        const wb=XLSX.read(e.target.result,{type:"string"});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        rows=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false});
+      }else{
+        const wb=XLSX.read(e.target.result,{type:"array"});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        rows=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false});
+      }
+      if(!rows||rows.length<2){toast("Plik pusty lub bez danych");ev.target.value="";return;}
+      // Pierwszy wiersz = nagłówki (zawsze). Jeśli ktoś ma plik bez nagłówków, musi wstawić jeden na górze.
+      _impHeaders=rows[0].map(h=>(h==null?"":String(h)).trim());
+      _impRows=rows.slice(1).filter(r=>r.some(c=>c!=null&&String(c).trim()));
+      if(_impRows.length===0){toast("Brak wierszy z danymi");ev.target.value="";return;}
+      showImportXLSXModal();
+    }catch(err){console.error("Excel parse:",err);toast("Błąd parsowania: "+err.message);}
+    ev.target.value="";
+  };
+  if(isCSV)reader.readAsText(f,"UTF-8");else reader.readAsArrayBuffer(f);
+}
+
+// Heurystyka zgadywania kolumn po nagłówku (PL + EN)
+function _guessImportColumn(type,headers){
+  const h=headers.map(x=>x.toLowerCase());
+  const map={
+    name:["imię","imie","imię i nazwisko","nazwisko","klient","nazwa","name","full name","fullname"],
+    phone:["tel","telefon","phone","numer","nr","tel.","nr tel","komórka","komorka","mobile","gsm","kontakt"],
+    email:["email","e-mail","mail","adres email"],
+    address:["adres","address","ulica","miasto"],
+    dob:["data ur","data urodzenia","dob","birth","urodziny"],
+    notes:["notatki","notes","uwagi","comments","komentarz"]
+  }[type]||[];
+  for(let i=0;i<h.length;i++){
+    for(const kw of map){if(h[i].includes(kw))return i;}
+  }
+  return -1;
+}
+
+function showImportXLSXModal(){
+  const cnt=_impRows.length;
+  const guessN=_guessImportColumn("name",_impHeaders);
+  const guessP=_guessImportColumn("phone",_impHeaders);
+  const guessE=_guessImportColumn("email",_impHeaders);
+  const guessA=_guessImportColumn("address",_impHeaders);
+  const guessD=_guessImportColumn("dob",_impHeaders);
+  const guessNt=_guessImportColumn("notes",_impHeaders);
+  const opt=(sel)=>_impHeaders.map((h,i)=>'<option value="'+i+'"'+(i===sel?" selected":"")+'>'+esc(h||"(kol. "+(i+1)+")")+'</option>').join("");
+  let h='<h3>📑 Import z Excela / CSV — '+cnt+' wierszy</h3>';
+  h+='<div class="db" style="background:var(--wb);border-left:3px solid var(--wn);color:var(--t)">⚠️ <strong>Uwaga RODO:</strong> zapis numeru w bazie w celu prowadzenia relacji biznesowej jest dopuszczalny (art. 6 ust. 1 lit. f RODO). Natomiast wysyłanie SMS-ów marketingowych wymaga <strong>wyraźnej zgody</strong> (art. 172 prawa telekom.) — ustaw to poniżej per cały batch.</div>';
+  h+='<div class="ct">1. Przypisz kolumny z pliku</div>';
+  h+='<div class="fr" style="gap:6px;margin-bottom:6px">';
+  h+='<div class="fl"><label>Imię / nazwisko *</label><select id="ixCol_name"><option value="-1">— wybierz —</option>'+opt(guessN)+'</select></div>';
+  h+='<div class="fl"><label>Telefon *</label><select id="ixCol_phone"><option value="-1">— wybierz —</option>'+opt(guessP)+'</select></div>';
+  h+='</div>';
+  h+='<div class="fr" style="gap:6px;margin-bottom:6px">';
+  h+='<div class="fl"><label>E-mail</label><select id="ixCol_email"><option value="-1">— pomiń —</option>'+opt(guessE)+'</select></div>';
+  h+='<div class="fl"><label>Adres</label><select id="ixCol_address"><option value="-1">— pomiń —</option>'+opt(guessA)+'</select></div>';
+  h+='</div>';
+  h+='<div class="fr" style="gap:6px;margin-bottom:6px">';
+  h+='<div class="fl"><label>Data urodzenia</label><select id="ixCol_dob"><option value="-1">— pomiń —</option>'+opt(guessD)+'</select></div>';
+  h+='<div class="fl"><label>Notatki z kolumny</label><select id="ixCol_notes"><option value="-1">— pomiń —</option>'+opt(guessNt)+'</select></div>';
+  h+='</div>';
+  h+='<div class="ct" style="margin-top:10px">2. Źródło kontaktu — jak te numery trafiły do Ciebie?</div>';
+  h+='<select id="ixSource" style="margin-bottom:6px" onchange="_ixUpdateConsent()">';
+  h+='<option value="phone_call">Klient zadzwonił — rozmawialiśmy telefonicznie</option>';
+  h+='<option value="written_consent">Klient podpisał zgodę marketingową (papierowo/elektronicznie)</option>';
+  h+='<option value="booksy_export">Eksport z Booksy / poprzedniego systemu</option>';
+  h+='<option value="paper_list">Stara papierowa lista klientów gabinetu</option>';
+  h+='<option value="other">Inne — opisz poniżej</option>';
+  h+='</select>';
+  h+='<input type="text" id="ixSourceNote" placeholder="Notatka o źródle (opcjonalnie, np. data rozmowy)" style="margin-bottom:10px">';
+  h+='<div class="ct" style="margin-top:6px">3. Zgoda marketingowa na SMS-y</div>';
+  h+='<div id="ixConsentInfo" style="background:var(--wb);border-left:3px solid var(--wn);padding:8px;border-radius:var(--rs);font:400 10px var(--fb);margin-bottom:8px"></div>';
+  h+='<label class="cc" style="margin-bottom:8px"><input type="checkbox" id="ixMarketingFlag"><span><strong>Ci klienci mają udokumentowaną zgodę marketingową</strong> — mogę wysyłać SMS-y promocyjne</span></label>';
+  h+='<div class="ct" style="margin-top:10px">4. Co zrobić z duplikatami (ten sam numer)?</div>';
+  h+='<select id="ixDup" style="margin-bottom:10px">';
+  h+='<option value="skip">Pominąć — nie importuj istniejących</option>';
+  h+='<option value="update">Zaktualizuj dane (imię, email, adres)</option>';
+  h+='</select>';
+  h+='<div class="brow"><button class="b bs" onclick="doImportXLSX()">✅ Importuj '+cnt+' wierszy</button><button class="b b2" onclick="closeMo();_impRows=null;_impHeaders=null">Anuluj</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+  _ixUpdateConsent();
+}
+
+// Aktualizuje info o zgodzie marketingowej w zależności od wybranego źródła
+function _ixUpdateConsent(){
+  const src=document.getElementById("ixSource")?.value;
+  const info=document.getElementById("ixConsentInfo");const cb=document.getElementById("ixMarketingFlag");
+  if(!info||!cb)return;
+  if(src==="written_consent"){
+    info.innerHTML='✅ <strong>Masz zgodę na piśmie.</strong> Możesz zaznaczyć pole poniżej — klienci trafią do bazy z aktywną zgodą marketingową.';
+    info.style.background="var(--sb)";info.style.borderColor="var(--sc)";
+    cb.disabled=false;
+  }else if(src==="phone_call"){
+    info.innerHTML='⚠️ <strong>Rozmowa telefoniczna.</strong> Jeśli podczas rozmowy klient wyraził zgodę na SMS-y i masz to udokumentowane (notatka), zaznacz poniżej. Jeśli nie — pozostaw niezaznaczone, a klient zostanie dodany tylko do dzwonienia.';
+    info.style.background="var(--wb)";info.style.borderColor="var(--wn)";
+  }else{
+    info.innerHTML='ℹ️ <strong>Źródło niepewne.</strong> Domyślnie klienci trafią do bazy bez zgody marketingowej — możesz ich dzwonić, ale nie wysyłać masowych SMS-ów. Zgodę marketingową zbierz osobno przy najbliższej wizycie.';
+    info.style.background="var(--bg2)";info.style.borderColor="var(--bd)";
+    cb.checked=false;
+  }
+}
+
+// Normalizuje telefon do formatu do porównań: tylko cyfry, usuwa +48, spacje, myślniki
+function _normalizePhone(p){if(!p)return"";return String(p).replace(/\D/g,"").replace(/^48(\d{9})$/,"$1");}
+
+async function doImportXLSX(){
+  if(!_impRows||!_impHeaders){toast("Brak danych");return;}
+  const col={name:+document.getElementById("ixCol_name").value,phone:+document.getElementById("ixCol_phone").value,email:+document.getElementById("ixCol_email").value,address:+document.getElementById("ixCol_address").value,dob:+document.getElementById("ixCol_dob").value,notes:+document.getElementById("ixCol_notes").value};
+  if(col.name<0||col.phone<0){toast("Musisz przypisać Imię i Telefon");return;}
+  const source=document.getElementById("ixSource").value;
+  const sourceNote=(document.getElementById("ixSourceNote").value||"").trim();
+  const marketing=document.getElementById("ixMarketingFlag").checked;
+  const dupMode=document.getElementById("ixDup").value;
+  // Zaciągnij istniejące żeby deduplikować po telefonie
+  const existing=await dbGetAll("clients");
+  const byPhone={};existing.forEach(c=>{const p=_normalizePhone(c.phone);if(p)byPhone[p]=c;});
+  let added=0,updated=0,skipped=0,errors=0,noName=0;
+  // Mapa źródeł na ludzkie teksty dla pola notatki/importSource
+  const srcLabels={phone_call:"Rozmowa telefoniczna",written_consent:"Zgoda pisemna",booksy_export:"Eksport Booksy",paper_list:"Stara lista papierowa",other:"Inne"};
+  const nowISO=new Date().toISOString();
+  for(const row of _impRows){
+    try{
+      const rawName=(row[col.name]==null?"":String(row[col.name])).trim();
+      const rawPhone=(row[col.phone]==null?"":String(row[col.phone])).trim();
+      if(!rawPhone){errors++;continue;}
+      // Imię może być puste — wtedy trafia do "do zidentyfikowania"
+      const nm=rawName||"";if(!nm)noName++;
+      const normP=_normalizePhone(rawPhone);
+      const rec={
+        name:nm,
+        phone:rawPhone,
+        email:col.email>=0?String(row[col.email]||"").trim():"",
+        address:col.address>=0?String(row[col.address]||"").trim():"",
+        dob:col.dob>=0?String(row[col.dob]||"").trim():"",
+        importSource:source,
+        importSourceLabel:srcLabels[source]||source,
+        importSourceNote:sourceNote,
+        importedAt:nowISO,
+        marketingConsent:marketing,
+        marketingConsentDate:marketing?nowISO.substring(0,10):null,
+        needsIdentification:!nm, // flaga: pokaż w ekranie "Numery do zidentyfikowania"
+        extraNotes:col.notes>=0?String(row[col.notes]||"").trim():"",
+        createdAt:nowISO,
+        updatedAt:nowISO
+      };
+      if(normP&&byPhone[normP]){
+        if(dupMode==="skip"){skipped++;continue;}
+        else{
+          const ex=byPhone[normP];
+          // Update wybranych pól — nie nadpisujemy name jeśli nowy jest pusty a stary nie
+          if(nm)ex.name=nm;
+          if(rec.email&&!ex.email)ex.email=rec.email;
+          if(rec.address&&!ex.address)ex.address=rec.address;
+          if(rec.dob&&!ex.dob)ex.dob=rec.dob;
+          ex.importSource=source;ex.importSourceLabel=rec.importSourceLabel;
+          ex.importSourceNote=sourceNote;ex.importedAt=nowISO;
+          if(marketing&&!ex.marketingConsent){ex.marketingConsent=true;ex.marketingConsentDate=nowISO.substring(0,10);}
+          ex.updatedAt=nowISO;
+          await dbPut("clients",ex);supaUpsert("clients",ex);
+          updated++;
+        }
+      }else{
+        const id=await dbAdd("clients",rec);
+        supaUpsert("clients",{id,...rec});
+        added++;
+      }
+    }catch(e){console.warn("Import row error:",e);errors++;}
+  }
+  closeMo();_impRows=null;_impHeaders=null;
+  let msg="✓ Dodano: "+added;
+  if(updated)msg+=", zaktualizowano: "+updated;
+  if(skipped)msg+=", pominięto (duplikaty): "+skipped;
+  if(errors)msg+=", błędy: "+errors;
+  if(noName)msg+=", bez nazwiska: "+noName+" (zobacz 'Do zidentyfikowania')";
+  toast(msg);
+  await loadCl();
+}
 function showCRM(){document.getElementById("modC").innerHTML='<h3>Eksport do CRM</h3><div class="db" style="border-left-color:#7C4DFF"><strong>Booksy</strong> — rezerwacje online PL.<br><a href="https://booksy.com/biz/pl-pl" target="_blank" class="b b1 bsm" style="margin-top:4px">→</a></div><div class="db" style="border-left-color:#00BFA5"><strong>Fresha</strong> — darmowy CRM.<br><a href="https://fresha.com/for-business" target="_blank" class="b b1 bsm" style="margin-top:4px">→</a></div><div class="brow"><button class="b b1" onclick="expCSV();closeMo()">CSV</button><button class="b b2" onclick="closeMo()">Zamknij</button></div>';document.getElementById("modal").classList.add("on");}
+
+// ===== NUMERY DO ZIDENTYFIKOWANIA =====
+// Ekran listy numerów telefonów bez przypisanego nazwiska — zwykle z importu Excela.
+// Cel: Patryk/Magda otwiera listę, dzwoni do klienta, dopytuje kto to, wpisuje nazwisko, zapisuje.
+// NIE daje przycisku SMS — rozmowa telefoniczna jest legalna (art. 172 dotyczy komunikatów marketingowych,
+// a niesprecyzowany telefon w celu identyfikacji to zwykła rozmowa biznesowa, dopuszczalna z art. 6 lit. f RODO).
+
+async function showUnknownPhones(){
+  const all=await dbGetAll("clients");
+  // Kryteria: brak nazwiska (najważniejsze), flaga needsIdentification, albo nazwa === telefon (ktoś wstawił nr w pole imię)
+  const unknown=all.filter(c=>{
+    if(!c.name||!String(c.name).trim())return true;
+    if(c.needsIdentification)return true;
+    const n=String(c.name).trim();const p=_normalizePhone(c.phone);
+    if(p&&_normalizePhone(n)===p)return true; // numer w polu nazwiska
+    return false;
+  });
+  let h='<h3>📞 Numery do zidentyfikowania <span style="font:300 12px var(--fb);color:var(--t2)">('+unknown.length+')</span></h3>';
+  if(unknown.length===0){
+    h+='<div class="db" style="background:var(--sb);border-left-color:var(--sc)">✅ <strong>Wszystkie numery masz zidentyfikowane.</strong> Nowi klienci trafiają tu, gdy podczas importu z Excela nie masz dla nich nazwiska.</div>';
+  }else{
+    h+='<div class="db" style="background:var(--wb);border-left-color:var(--wn);font:400 10px var(--fb)">Lista numerów bez nazwiska. Zadzwoń, dopytaj kto to jest, wpisz imię i zapisz. <strong>Nie wysyłaj masowych SMS-ów</strong> na te numery — art. 172 prawa telekomunikacyjnego wymaga wyraźnej zgody marketingowej.</div>';
+    h+='<div style="max-height:400px;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--rs)">';
+    unknown.forEach(c=>{
+      const src=c.importSourceLabel?' · '+esc(c.importSourceLabel):'';
+      const dt=c.importedAt?' · '+esc(c.importedAt.substring(0,10)):'';
+      const extra=c.extraNotes?'<div style="font:300 9px var(--fb);color:var(--t2);margin-top:2px">📝 '+esc(c.extraNotes.substring(0,80))+(c.extraNotes.length>80?"...":"")+'</div>':'';
+      h+='<div style="padding:8px;border-bottom:1px solid var(--bd);display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap">';
+      h+='<div style="flex:1;min-width:160px">';
+      h+='<div style="font:600 13px var(--fb)">'+esc(c.phone||"(brak numeru)")+'</div>';
+      h+='<div style="font:300 9px var(--fb);color:var(--t2)">ID: '+c.id+src+dt+'</div>';
+      h+=extra;
+      h+='</div>';
+      if(c.phone)h+='<a href="tel:'+encodeURIComponent(c.phone)+'" class="b b1 bsm" style="text-decoration:none">📞 Zadzwoń</a>';
+      h+='<button class="b bs bsm" onclick="identifyUnknownPhone('+c.id+')">✏️ Wpisz nazwisko</button>';
+      h+='<button class="b bd bsm" onclick="deleteUnknownPhone('+c.id+')" title="Usuń">🗑</button>';
+      h+='</div>';
+    });
+    h+='</div>';
+  }
+  h+='<div class="brow" style="margin-top:10px"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+}
+
+// Mały modal do wpisania nazwiska + opcjonalnych notatek, po których klient znika z listy "do zidentyfikowania"
+async function identifyUnknownPhone(cid){
+  const cls=await dbGetAll("clients");const c=cls.find(x=>x.id===cid);
+  if(!c){toast("Nie znaleziono");return;}
+  let h='<h3>✏️ Zidentyfikuj: '+esc(c.phone||"?")+'</h3>';
+  h+='<div class="fl"><label>Imię / nazwisko *</label><input type="text" id="idfName" placeholder="np. Anna Kowalska" autofocus></div>';
+  h+='<div class="fl"><label>Email (opcjonalnie)</label><input type="email" id="idfEmail" value="'+esc(c.email||"")+'"></div>';
+  h+='<div class="fl"><label>Adres (opcjonalnie)</label><input type="text" id="idfAddress" value="'+esc(c.address||"")+'"></div>';
+  h+='<div class="fl"><label>Notatka z rozmowy (opcjonalnie)</label><textarea id="idfNote" rows="2" placeholder="np. Pyta o BioRePeel, umówiona na konsultację 2026-05-10">'+esc(c.extraNotes||"")+'</textarea></div>';
+  h+='<label class="cc" style="margin-top:6px"><input type="checkbox" id="idfMarketing"'+(c.marketingConsent?" checked":"")+'><span>Podczas rozmowy wyraziła zgodę na SMS-y promocyjne (udokumentowane w notatce powyżej)</span></label>';
+  h+='<div class="brow" style="margin-top:10px"><button class="b bs" onclick="saveIdentifiedPhone('+cid+')">💾 Zapisz</button><button class="b b2" onclick="showUnknownPhones()">← Wróć do listy</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  setTimeout(()=>document.getElementById("idfName")?.focus(),100);
+}
+
+async function saveIdentifiedPhone(cid){
+  const name=(document.getElementById("idfName").value||"").trim();
+  if(!name){toast("Wpisz imię i nazwisko");return;}
+  const cls=await dbGetAll("clients");const c=cls.find(x=>x.id===cid);
+  if(!c){toast("Nie znaleziono");return;}
+  c.name=name;
+  c.email=(document.getElementById("idfEmail").value||"").trim();
+  c.address=(document.getElementById("idfAddress").value||"").trim();
+  c.extraNotes=(document.getElementById("idfNote").value||"").trim();
+  const mk=document.getElementById("idfMarketing").checked;
+  if(mk&&!c.marketingConsent){c.marketingConsent=true;c.marketingConsentDate=new Date().toISOString().substring(0,10);}
+  c.needsIdentification=false;
+  c.updatedAt=new Date().toISOString();
+  await dbPut("clients",c);supaUpsert("clients",c);
+  toast("Zapisano ✓");
+  await loadCl();
+  showUnknownPhones();
+}
+
+async function deleteUnknownPhone(cid){
+  if(!confirm("Usunąć ten numer z bazy?"))return;
+  await dbDel("clients",cid);supaDelete("clients",cid);
+  toast("Usunięto ✓");
+  await loadCl();
+  showUnknownPhones();
+}
 
 function closeMo(){document.getElementById("modal").classList.remove("on");try{document.removeEventListener("click",bkOutsideClick,true);}catch(_){}try{document.removeEventListener("click",serOutsideClick,true);}catch(_){}}
 function esc(s){if(!s)return"";const d=document.createElement("div");d.textContent=s;return d.innerHTML;}
@@ -2853,6 +3141,7 @@ function renderSerList(){
     h+='<div class="ss-ctrl">';
     h+='<input type="date" value="'+s.date+'" onchange="editSerSlot('+i+',this.value,null)">';
     h+='<input type="time" value="'+s.time+'" step="900" onchange="editSerSlot('+i+',null,this.value)">';
+    h+='<button class="b b1 bsm" onclick="peekDay(\''+s.date+'\','+i+')" title="Podgląd dnia i wyboru godziny">📅</button>';
     h+='<button class="b b2 bsm" onclick="removeSerSlot('+i+')" title="Usuń">✕</button>';
     h+='</div></div>';
   });
@@ -2887,6 +3176,205 @@ function removeSerSlot(i){
   // Przelicz numerację (renderSerList i tak to robi od nowa)
   renderSerList();
 }
+
+// ===== PODGLĄD DNIA / TYGODNIA / MIESIĄCA Z PLANERA SERII =====
+// Cel: user widzi który slot w rzędzie serii koliduje / jest wolny, i może kliknąć wolną godzinę
+//      aby przypisać ją do edytowanego terminu.
+// Implementacja: osobny overlay (#daypeek) nakłada się PONAD modal planera, więc nie tracimy stanu
+//      formularza. Zamknięcie peek = tylko chowa overlay, planer zostaje otwarty.
+// Widoki: day (domyślnie), week, month. Trzy przyciski do przełączania.
+
+let _peekMode="day"; // day | week | month
+let _peekAnchor=""; // data w formacie YYYY-MM-DD — punkt odniesienia dla week/month
+let _peekSlotIdx=-1; // który slot w serii edytujemy (żeby kliknięcie godziny je podmieniło)
+
+function peekDay(date,slotIdx){
+  _peekAnchor=date;_peekSlotIdx=(typeof slotIdx==="number")?slotIdx:-1;
+  _peekMode="day";
+  renderPeek();
+  document.getElementById("daypeek").style.display="block";
+}
+function closePeek(){
+  document.getElementById("daypeek").style.display="none";
+  _peekSlotIdx=-1;
+}
+function peekChangeMode(m){_peekMode=m;renderPeek();}
+function peekShiftAnchor(days){
+  const d=new Date(_peekAnchor+"T12:00:00");d.setDate(d.getDate()+days);
+  _peekAnchor=d.toISOString().substring(0,10);
+  renderPeek();
+}
+
+async function renderPeek(){
+  const c=document.getElementById("daypeekC");if(!c)return;
+  const appts=await dbGetAll("appointments");
+  const cls=await dbGetAll("clients");
+  const dur=+document.getElementById("serDur")?.value||60;
+  // Szacowana nazwa zabiegu do wizualizacji "czego szukam"
+  const trVal=document.getElementById("serTr")?.value;
+  const trIdx=trVal===""||trVal==null?null:+trVal;
+  const trName=(trIdx!=null&&FM[trIdx])?FM[trIdx].name:"(nie wybrano zabiegu)";
+  let h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">';
+  h+='<div style="font:600 14px var(--fd)">📅 Podgląd kalendarza'+(_peekSlotIdx>=0?' — termin nr '+(_peekSlotIdx+1):"")+'</div>';
+  h+='<button class="b b2 bsm" onclick="closePeek()">✕ Zamknij podgląd</button>';
+  h+='</div>';
+  h+='<div style="font:400 10px var(--fb);color:var(--t2);margin-bottom:6px">Zabieg: <strong>'+esc(trName)+'</strong> · czas: <strong>'+dur+' min</strong>';
+  if(_peekSlotIdx>=0)h+=' · <span style="color:var(--sc)">Kliknij wolną godzinę, aby przypisać do tego terminu</span>';
+  h+='</div>';
+  // Przełączniki widoku
+  h+='<div class="brow" style="margin-bottom:8px">';
+  h+='<button class="b bsm '+(_peekMode==="day"?"bs":"b2")+'" onclick="peekChangeMode(\'day\')">Dzień</button>';
+  h+='<button class="b bsm '+(_peekMode==="week"?"bs":"b2")+'" onclick="peekChangeMode(\'week\')">Tydzień</button>';
+  h+='<button class="b bsm '+(_peekMode==="month"?"bs":"b2")+'" onclick="peekChangeMode(\'month\')">Miesiąc</button>';
+  h+='<span style="flex:1"></span>';
+  h+='<button class="b b2 bsm" onclick="peekShiftAnchor('+(_peekMode==="month"?-30:_peekMode==="week"?-7:-1)+')">◀</button>';
+  h+='<button class="b b2 bsm" onclick="peekShiftAnchor('+(_peekMode==="month"?30:_peekMode==="week"?7:1)+')">▶</button>';
+  h+='</div>';
+  // Render właściwy
+  if(_peekMode==="day")h+=_renderPeekDay(_peekAnchor,appts,cls,dur);
+  else if(_peekMode==="week")h+=_renderPeekWeek(_peekAnchor,appts,cls,dur);
+  else h+=_renderPeekMonth(_peekAnchor,appts,dur);
+  c.innerHTML=h;
+}
+
+// Renderuje siatkę jednego dnia ze slotami 15-minutowymi i możliwością kliknięcia wolnego
+function _renderPeekDay(date,appts,cls,dur){
+  const d=new Date(date+"T12:00:00");
+  const dw=d.getDay();const hrs=HRS[dw];
+  let h='<div style="font:600 13px var(--fb);margin-bottom:6px">'+DNM[dw]+' '+d.toLocaleDateString("pl-PL",{day:"numeric",month:"long",year:"numeric"})+'</div>';
+  if(!hrs){return h+'<div class="db" style="background:var(--bg2)">Dzień wolny od pracy.</div>';}
+  const dayAppts=appts.filter(a=>a.date===date).sort((a,b)=>a.time.localeCompare(b.time));
+  h+='<div style="font:300 10px var(--fb);color:var(--t2);margin-bottom:6px">Godziny pracy: '+hrs[0]+':00 – '+hrs[1]+':00 · zaplanowane wizyty: <strong>'+dayAppts.length+'</strong></div>';
+  // Lista zajętych wizyt na górze
+  if(dayAppts.length){
+    h+='<div style="margin-bottom:8px;padding:6px;background:var(--bg2);border-radius:var(--rs);font:400 10px var(--fb)">';
+    h+='<div style="font:600 10px var(--fb);margin-bottom:2px">📌 Zajęte dziś:</div>';
+    dayAppts.forEach(a=>{
+      const cl=cls.find(c=>c.id===a.clientId);
+      const endH=parseInt(a.time.split(":")[0])*60+parseInt(a.time.split(":")[1])+(a.duration||60);
+      const endT=Math.floor(endH/60).toString().padStart(2,"0")+":"+(endH%60).toString().padStart(2,"0");
+      h+='<div>• <strong>'+esc(a.time)+'–'+esc(endT)+'</strong> '+esc(cl?.name||"?")+' — '+esc(a.treatment||"?")+'</div>';
+    });
+    h+='</div>';
+  }
+  // Siatka slotów 15-min
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px">';
+  for(let hr=hrs[0];hr<hrs[1];hr++){
+    for(let mn=0;mn<60;mn+=15){
+      const tl=String(hr).padStart(2,"0")+":"+String(mn).padStart(2,"0");
+      const conflict=_slotConflicts(date,tl,dur,appts,null);
+      // Wizualizacja: zielona = wolna, czerwona = zajęta (nakłada się na istniejącą wizytę z zadaną długością)
+      if(conflict){
+        h+='<div style="padding:6px 4px;background:var(--db);color:var(--dn);border-radius:var(--rs);font:400 10px var(--fb);text-align:center;opacity:.6">'+tl+'</div>';
+      }else{
+        const clickAction=_peekSlotIdx>=0?'onclick="peekAssign(\''+date+'\',\''+tl+'\')"':'';
+        const cursor=_peekSlotIdx>=0?'cursor:pointer':'cursor:default';
+        h+='<div style="padding:6px 4px;background:var(--sb);color:var(--sc);border-radius:var(--rs);font:600 10px var(--fb);text-align:center;'+cursor+';border:1px solid var(--sc)" '+clickAction+'>'+tl+'</div>';
+      }
+    }
+  }
+  h+='</div>';
+  if(_peekSlotIdx<0){
+    h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">💡 Aby wybrać godzinę dla konkretnego terminu, kliknij 📅 przy wierszu z listy w planerze.</div>';
+  }
+  return h;
+}
+
+// Widok tygodnia — pokazuje zajętość dla 7 dni zaczynając od poniedziałku który zawiera _peekAnchor
+function _renderPeekWeek(date,appts,cls,dur){
+  const d=new Date(date+"T12:00:00");
+  // Do poniedziałku: getDay 1=poniedziałek, 0=niedziela
+  const dow=d.getDay()||7; // 1..7
+  d.setDate(d.getDate()-(dow-1));
+  const days=[];for(let i=0;i<7;i++){const dd=new Date(d);dd.setDate(dd.getDate()+i);days.push(dd);}
+  let h='<div style="font:600 13px var(--fb);margin-bottom:6px">Tydzień '+days[0].toLocaleDateString("pl-PL",{day:"numeric",month:"short"})+' – '+days[6].toLocaleDateString("pl-PL",{day:"numeric",month:"short"})+'</div>';
+  // Siatka: kolumna = dzień, wiersz = slot 30-min (8:00-18:00). 20 wierszy.
+  h+='<div style="display:grid;grid-template-columns:50px repeat(7,1fr);gap:2px;font:400 9px var(--fb)">';
+  h+='<div></div>';
+  days.forEach(dd=>{
+    const dw=dd.getDay();
+    h+='<div style="text-align:center;font:600 10px var(--fb);padding:3px 0;background:var(--bg2);border-radius:3px">'+DNM[dw]+'<br><span style="font:400 9px var(--fb);color:var(--t2)">'+dd.getDate()+'</span></div>';
+  });
+  for(let hr=8;hr<18;hr++){
+    for(let mn=0;mn<60;mn+=30){
+      const tl=String(hr).padStart(2,"0")+":"+String(mn).padStart(2,"0");
+      if(mn===0)h+='<div style="font:600 9px var(--fb);color:var(--t2);text-align:right;padding-right:4px">'+hr+':00</div>';
+      else h+='<div></div>';
+      days.forEach(dd=>{
+        const dw=dd.getDay();const hrs=HRS[dw];
+        const ds=dd.toISOString().substring(0,10);
+        if(!hrs||hr<hrs[0]||hr>=hrs[1]){
+          h+='<div style="background:#f0ecec;border-radius:2px;min-height:18px"></div>';return;
+        }
+        const conflict=_slotConflicts(ds,tl,dur,appts,null);
+        if(conflict){h+='<div style="background:var(--db);border-radius:2px;min-height:18px;opacity:.8"></div>';}
+        else{
+          const ca=_peekSlotIdx>=0?'onclick="peekAssign(\''+ds+'\',\''+tl+'\')" style="cursor:pointer;background:var(--sb);border-radius:2px;min-height:18px;border:1px solid rgba(52,168,83,.3)"':'style="background:var(--sb);border-radius:2px;min-height:18px"';
+          h+='<div '+ca+'></div>';
+        }
+      });
+    }
+  }
+  h+='</div>';
+  h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">🟢 wolne · 🔴 zajęte · szary = poza godzinami pracy · raster co 30 min</div>';
+  return h;
+}
+
+// Widok miesiąca — kratki z licznikiem zajętych/wolnych slotów w każdym dniu
+function _renderPeekMonth(date,appts,dur){
+  const d=new Date(date+"T12:00:00");
+  const y=d.getFullYear(),m=d.getMonth();
+  const firstDay=new Date(y,m,1);
+  const lastDay=new Date(y,m+1,0);
+  const daysCount=lastDay.getDate();
+  const leadBlank=(firstDay.getDay()||7)-1; // ile pustych przed 1. dnia, poniedziałek=0
+  let h='<div style="font:600 13px var(--fb);margin-bottom:6px">'+firstDay.toLocaleDateString("pl-PL",{month:"long",year:"numeric"})+'</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">';
+  ["Pn","Wt","Śr","Cz","Pt","Sb","Nd"].forEach(dn=>{h+='<div style="text-align:center;font:600 9px var(--fb);color:var(--t2);padding:2px">'+dn+'</div>';});
+  for(let i=0;i<leadBlank;i++)h+='<div></div>';
+  for(let day=1;day<=daysCount;day++){
+    const dd=new Date(y,m,day);const dw=dd.getDay();
+    const ds=dd.toISOString().substring(0,10);
+    const hrs=HRS[dw];
+    const dayAppts=appts.filter(a=>a.date===ds);
+    if(!hrs){
+      h+='<div style="padding:4px;background:#f0ecec;border-radius:3px;text-align:center;font:400 11px var(--fb);color:var(--t2);min-height:40px"><div>'+day+'</div><div style="font:300 8px var(--fb)">wolne</div></div>';
+      continue;
+    }
+    // Procent zajętości: liczba rezerwacji / "max wizyt" — zakładamy średnio 8 slotów na dzień (~godzinnych)
+    const workMin=(hrs[1]-hrs[0])*60;
+    const bookedMin=dayAppts.reduce((s,a)=>s+(a.duration||60),0);
+    const pct=Math.min(100,Math.round(bookedMin/workMin*100));
+    // Kolor: 0-40% zielony, 40-70% żółty, 70-100% pomarańczowy
+    const bg=pct>80?"#ffd6d6":pct>50?"#ffeccf":pct>20?"#e2f5cf":"#f0fbe6";
+    const brd=pct>80?"var(--dn)":pct>50?"var(--wn)":"var(--sc)";
+    h+='<div onclick="_peekAnchor=\''+ds+'\';peekChangeMode(\'day\')" style="padding:4px;background:'+bg+';border:1px solid '+brd+';border-radius:3px;text-align:center;cursor:pointer;min-height:40px">';
+    h+='<div style="font:700 12px var(--fb)">'+day+'</div>';
+    h+='<div style="font:400 9px var(--fb)">'+dayAppts.length+' wiz.</div>';
+    h+='<div style="font:300 8px var(--fb);color:var(--t2)">'+pct+'%</div>';
+    h+='</div>';
+  }
+  h+='</div>';
+  h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">🟢 wolny · 🟡 półzajęty · 🟠 mocno zajęty · 🔴 pełny · kliknij dzień aby przejść do widoku godzin</div>';
+  return h;
+}
+
+// Kliknięcie w wolny slot: przenosi zaznaczenie do _peekSlotIdx serii i chowa overlay
+async function peekAssign(date,time){
+  const idx=_peekSlotIdx;
+  if(idx<0){toast("Otwórz podgląd przyciskiem 📅 przy konkretnym terminie, żeby go przypisać");return;}
+  // Zmień slot ręcznie (przez editSerSlot nie możemy, bo tam jest rewrite i rescan kolizji)
+  const slots=window._serSlots||[];if(!slots[idx])return;
+  slots[idx].date=date;slots[idx].time=time;slots[idx].edited=true;
+  // Ponowne sprawdzenie kolizji
+  const appts=await dbGetAll("appointments");
+  const dur=+document.getElementById("serDur")?.value||60;
+  slots[idx].conflict=_slotConflicts(date,time,dur,appts,null);
+  closePeek();
+  renderSerList();
+  toast("Termin #"+(idx+1)+" przeniesiony na "+date+" "+time);
+}
+
 
 async function confirmSeries(withSMS){
   // Wczytaj aktualne wybory (user mógł zmienić zabieg już po "Przelicz")
