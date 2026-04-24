@@ -19,6 +19,18 @@
       "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ],
@@ -27,19 +39,22 @@
       "name": "Nowa zgoda",
       "short_name": "Zgoda",
       "description": "Wypełnij nowy formularz zgody",
-      "url": "./?v=consent"
+      "url": "./?v=consent",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
     },
     {
       "name": "Kalendarz",
       "short_name": "Kalendarz",
       "description": "Zobacz nadchodzące wizyty",
-      "url": "./?v=calendar"
+      "url": "./?v=calendar",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
     },
     {
       "name": "Klienci",
       "short_name": "Klienci",
       "description": "Baza klientów i kontakty",
-      "url": "./?v=clients"
+      "url": "./?v=clients",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
     }
   ]
 }
