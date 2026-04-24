@@ -9,6 +9,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Gabinet MM">
 <meta name="description" content="Gabinet Kosmetologiczny Magda Mączyńska — System Zgód, CRM, Kalendarz">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%231E1B18'/%3E%3Ctext x='50' y='66' font-family='Georgia' font-size='56' font-weight='700' fill='%23C8AD82' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%231E1B18'/%3E%3Ctext x='50' y='66' font-family='Georgia' font-size='56' font-weight='700' fill='%23C8AD82' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
@@ -1127,8 +1130,33 @@ async function installApp(){
   if(outcome==="accepted"){toast("Aplikacja zainstalowana ✓");document.getElementById("installBanner").classList.remove("on");}
   deferredInstallPrompt=null;
 }
-// Service worker registration
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(e=>console.log('SW reg failed:',e));});}
+// ===== SERVICE WORKER — INLINE (nie wymaga zewnętrznego sw.js) =====
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    // Krok 1: Usuń wszystkie stare SW — to naprawia "zmiany nie są nanoszone" na GitHub Pages
+    navigator.serviceWorker.getRegistrations().then(regs=>{
+      regs.forEach(r=>r.unregister().then(()=>console.log('[SW] Odrejestrowano stary SW:',r.scope)));
+    });
+    // Krok 2: Zarejestruj inline SW z network-first (zawsze pobiera świeże zasoby gdy online)
+    const CV='mm-v'+Date.now().toString(36).slice(-6);
+    const swCode=`const CV='${CV}';
+self.addEventListener('install',()=>self.skipWaiting());
+self.addEventListener('activate',e=>{
+  e.waitUntil(caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))));
+  self.clients.claim();
+});
+self.addEventListener('fetch',e=>{
+  if(e.request.method!=='GET')return;
+  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+});`;
+    try{
+      const blob=new Blob([swCode],{type:'application/javascript'});
+      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'./'})
+        .then(r=>console.log('[SW] Inline SW OK:',r.scope))
+        .catch(e=>console.log('[SW] Blob URL nie obsługiwany (OK na GitHub Pages):',e.message));
+    }catch(e){console.log('[SW] Pominięto:',e);}
+  });
+}
 
 // ===== CONFIG =====
 function saveConfig(){
@@ -4838,20 +4866,39 @@ function deleteCustomTreatment(customId){
 // Kosmetolożka najpierw wybiera zabieg w "Nowa zgoda", potem klika "Uruchom tryb klienta".
 // ===================================================================
 function kioskEnter(){
-  // Sprawdź czy zabieg jest wybrany
   const tSel=document.getElementById("tSel");
+  // Jeśli zabieg nie wybrany — pokaż modal wyboru ZAMIAST frustrującego redirect
   if(!tSel||!tSel.value){
-    toast("⚠ Najpierw wybierz zabieg w zakładce \"Nowa zgoda\"");
-    showV("consent");
+    _kioskPickTreatment();
     return;
   }
-  // Przejdź do formularza zgody i aktywuj tryb
+  // Zabieg wybrany — aktywuj tryb klienta
   showV("consent");
   document.body.classList.add("kiosk-mode");
-  // Zablokuj klawisze nawigacyjne (F5, Ctrl+R)
   window.addEventListener("keydown",_kioskBlockKeys,true);
   window.scrollTo(0,0);
   toast("🖥 Tryb klienta aktywny — daj tablet klientowi");
+}
+
+// Modal wyboru zabiegu przed uruchomieniem trybu klienta
+function _kioskPickTreatment(){
+  const tSel=document.getElementById("tSel");
+  if(!tSel)return;
+  // Zbuduj listę dostępnych zabiegów z istniejącego selecta
+  const opts=Array.from(tSel.options).filter(o=>o.value);
+  let optsHtml=opts.map(o=>
+    `<button class="b b2 bbl" style="text-align:left;padding:10px 14px;margin-bottom:4px" `+
+    `onclick="document.getElementById('tSel').value='${o.value}';`+
+    `document.getElementById('tSel').dispatchEvent(new Event('change'));`+
+    `closeMo();setTimeout(kioskEnter,150)">${o.textContent}</button>`
+  ).join('');
+  const modC=document.getElementById("modC");
+  if(!modC)return;
+  modC.innerHTML=
+    '<h3 style="text-align:center;margin-bottom:6px">🖥 Tryb klienta</h3>'+
+    '<p style="font:300 11px var(--fb);color:var(--t2);text-align:center;margin-bottom:14px">Wybierz zabieg, który będzie wykonywany</p>'+
+    '<div style="max-height:55vh;overflow-y:auto;display:flex;flex-direction:column">'+optsHtml+'</div>';
+  document.getElementById("modal").classList.add("on");
 }
 
 // Filtr wyszukiwarki zabiegów — ukrywa opcje które nie pasują do wpisanego tekstu
