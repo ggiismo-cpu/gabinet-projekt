@@ -367,7 +367,10 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
 <div class="cal-suggest" id="calSuggest"></div></div></div>
 
 <div id="vMenu" class="vw">
-<div class="cd"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;gap:6px">Menu Zabiegowe — cennik i opisy <button class="b bs bsm" onclick="openTreatmentForm(null,null)">➕ Nowy zabieg</button></div>
+<div class="cd"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">Menu Zabiegowe — cennik i opisy
+<div class="brow" style="margin:0"><button class="b bs bsm" onclick="openTreatmentForm(null,null)">➕ Nowy zabieg</button>
+<button class="b b2 bsm" onclick="showHiddenTreatmentsModal()" title="Zarządzaj ukrytymi zabiegami">🚫 Ukryte</button></div>
+</div>
 <div class="menu-search"><input type="text" id="menuSrch" placeholder="Szukaj zabiegu..."></div>
 <div id="menuContent"></div></div></div>
 
@@ -1364,6 +1367,8 @@ document.addEventListener("DOMContentLoaded",()=>{
   },200); // poczekaj aż supa-js obsłuży hash
   const s=document.getElementById("tSel");
   T.forEach(t=>{const o=document.createElement("option");o.value=t.id;o.textContent=t.name;s.appendChild(o);});
+  // Po początkowym wypełnieniu — przefiltruj po ukrytych zabiegach (FIX 5)
+  if(typeof _rebuildTreatmentSelect==="function")_rebuildTreatmentSelect();
   s.addEventListener("change",()=>{
     renderForm();
     // Po wyborze zabiegu — pokaż modal wyboru trybu (klient/kosmetolog)
@@ -1413,6 +1418,27 @@ document.addEventListener("DOMContentLoaded",()=>{
   window.addEventListener("pageshow",()=>{_photoDraftRestore();});
   // Jeśli nie ma konfiguracji PIN i nie ma sesji Supabase → pozwól na szybki dostęp
   // (mode selector zostanie pokazany, użytkownik wybiera)
+
+  // Po pełnym wczytaniu DOM — wymuś widok pierwotny (Nowa zgoda) z czystym formularzem.
+  // Robimy to ZAWSZE po reload, niezależnie od poprzedniego stanu w DOM:
+  //   • brak "zawieszonych" widoków typu vDetail/vCal po F5
+  //   • zerwany kontekst zabiegu/klienta = czyste pole startu dla kosmetolożki
+  //   • _viewStack zerwany (nie ma do czego wracać)
+  // Wykonujemy w setTimeout żeby reszta inicjalizacji (T.forEach, eventy) się dokończyła.
+  setTimeout(()=>{
+    if(document.body.classList.contains("kiosk-mode"))return; // nie przeszkadzaj klientowi w kiosku
+    const tSel=document.getElementById("tSel");if(tSel)tSel.value="";
+    const tSrch=document.getElementById("tSrch");if(tSrch)tSrch.value="";
+    if(typeof renderForm==="function")renderForm(); // czyści fC i subC, resetuje cur
+    if(typeof _viewStack!=="undefined")_viewStack.length=0; // po reload nie ma "wstecz"
+    // Pokaż widok zgody (defaultowy w HTML, ale dla pewności)
+    if(!document.getElementById("vConsent").classList.contains("on")){
+      document.querySelectorAll(".vw").forEach(e=>e.classList.remove("on"));
+      document.getElementById("vConsent").classList.add("on");
+      document.querySelectorAll(".nav button[data-v]").forEach(b=>b.classList.toggle("on",b.dataset.v==="consent"));
+    }
+    if(typeof updBackBtn==="function")updBackBtn();
+  },80);
 });
 
 function checkPin(){
@@ -1712,6 +1738,18 @@ function doDiscardDraft(cid){
 
 function renderForm(){
   const id=document.getElementById("tSel").value,fc=document.getElementById("fC"),sc=document.getElementById("subC");
+  // FIX 4: Zanim wyrzucimy poprzednią treść fc — zapamiętaj aktualne wartości pól klienta.
+  // Dzięki temu zmiana zabiegu (przy już wpisanych danych klienta lub dopasowanym z bazy)
+  // NIE resetuje danych. To rozwiązuje "ginie wybór wcześniejszy klienta".
+  const _prevClient={
+    name:document.getElementById("fN")?.value||"",
+    phone:document.getElementById("fP")?.value||"",
+    email:document.getElementById("fE")?.value||"",
+    address:document.getElementById("fA")?.value||"",
+    pesel:document.getElementById("fPe")?.value||"",
+    dob:document.getElementById("fD")?.value||"",
+    selectedClientId:_consentSelectedClientId||null
+  };
   if(!id){fc.innerHTML="";sc.innerHTML="";cur=null;curMenu=null;stopDraftTimer();return;}
   cur=T.find(t=>t.id===id);
   curMenu=FM.find(m=>m.consentId===id)||null;
@@ -1724,11 +1762,18 @@ function renderForm(){
   if(curMenu){h+='<div style="display:flex;gap:10px;flex-wrap:wrap;font:400 10px var(--fb);color:var(--t);margin-bottom:4px"><span>⏱ <strong>'+esc(curMenu.durTxt)+'</strong></span><span>🔄 '+esc(curMenu.repeat)+'</span></div>';}
   if(cur.info){h+='<div class="db" style="border-left-color:var(--dn)">'+esc(cur.info)+'</div>';}
   h+='</div>';
-  // Client data
-  h+='<div class="cd"><div class="ct">Dane klienta</div>';
-  h+='<div class="fr"><div class="fl"><label>Imię i Nazwisko <span class="rq">*</span></label><input type="text" id="fN" data-rq autocomplete="name"></div><div class="fl"><label>Data urodzenia</label>'+dobPickerHTML("fD","")+'</div></div>';
-  h+='<div class="fr"><div class="fl"><label>Telefon <span class="rq">*</span></label><input type="tel" id="fP" data-rq autocomplete="tel" oninput="validatePhoneInput(this)" onblur="validatePhoneInput(this,true)"><span class="input-hint" id="fPHint">Format: 503 672 015 lub +48 503 672 015 (9 cyfr)</span></div><div class="fl"><label>E-mail</label><input type="email" id="fE" autocomplete="email"></div></div>';
-  h+='<div class="fr"><div class="fl"><label>PESEL</label><input type="text" id="fPe" maxlength="11" inputmode="numeric"></div><div class="fl"><label>Adres</label><input type="text" id="fA"></div></div>';
+  // FIX 3: Sekcja wyszukiwania klienta z bazy + przycisk "Nowy klient" który NIE kasuje wyboru zabiegu.
+  // Przepływ: kosmetolog wybrał zabieg → tu może (a) wyszukać istniejącego klienta z autocomplete,
+  // (b) dodać nowego klienta przez modal — po zapisie modal zamyka się i wpisuje dane do pól poniżej,
+  // BEZ przebudowy renderForm (więc tSel.value, cur, photos, draft pozostają nietknięte).
+  h+='<div class="cd"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">Dane klienta';
+  h+='<button class="b bs bsm" onclick="openNewClientForConsent()">➕ Nowy klient</button></div>';
+  h+='<div class="fl"><label>🔍 Wyszukaj klienta z bazy <span style="font:300 9px var(--fb);color:var(--t2)">(opcjonalnie — uzupełni dane poniżej)</span></label>';
+  h+='<input type="text" id="fClSrch" placeholder="Wpisz imię, nazwisko lub telefon..." oninput="searchClientForConsent(this.value)" autocomplete="off">';
+  h+='<div id="fClResults" class="cal-res" style="position:relative;max-height:200px;overflow-y:auto;display:none"></div></div>';
+  h+='<div class="fr"><div class="fl"><label>Imię i Nazwisko <span class="rq">*</span></label><input type="text" id="fN" data-rq autocomplete="name" value="'+esc(_prevClient.name)+'"></div><div class="fl"><label>Data urodzenia</label>'+dobPickerHTML("fD",_prevClient.dob)+'</div></div>';
+  h+='<div class="fr"><div class="fl"><label>Telefon <span class="rq">*</span></label><input type="tel" id="fP" data-rq autocomplete="tel" oninput="validatePhoneInput(this)" onblur="validatePhoneInput(this,true)" value="'+esc(_prevClient.phone)+'"><span class="input-hint" id="fPHint">Format: 503 672 015 lub +48 503 672 015 (9 cyfr)</span></div><div class="fl"><label>E-mail</label><input type="email" id="fE" autocomplete="email" value="'+esc(_prevClient.email)+'"></div></div>';
+  h+='<div class="fr"><div class="fl"><label>PESEL</label><input type="text" id="fPe" maxlength="11" inputmode="numeric" value="'+esc(_prevClient.pesel)+'"></div><div class="fl"><label>Adres</label><input type="text" id="fA" value="'+esc(_prevClient.address)+'"></div></div>';
   if(cur.extra_fields)cur.extra_fields.forEach(ef=>{h+='<div class="fr f1"><div class="fl"><label>'+esc(ef)+'</label><input type="text" class="exF" data-l="'+esc(ef)+'"></div></div>';});
   h+='</div>';
   if(cur.health_interview&&cur.health_interview.length){h+='<div class="cd"><div class="ct">Wywiad zdrowotny</div><div class="cg">';cur.health_interview.forEach((c,i)=>{h+=mkCI(c,"h_"+i);});h+='</div></div>';}
@@ -1803,6 +1848,57 @@ function renderForm(){
 }
 
 function mkCI(label,id){return'<div class="ci" id="ci_'+id+'"><div class="rg"><button data-id="'+id+'" data-v="1" onclick="setCI(this)">TAK</button><button data-id="'+id+'" data-v="0" onclick="setCI(this)">NIE</button></div><div class="cl">'+esc(label)+'</div></div>';}
+
+// ===== WYSZUKIWANIE / DODAWANIE KLIENTA W FORMULARZU ZGODY =====
+// Cel: pozwolić kosmetolodze WYBRAĆ zabieg, a POTEM bez utraty kontekstu wyszukać
+// istniejącego klienta lub dodać nowego. Wcześniejszy flow: ginął wybór zabiegu po
+// kliknięciu "Nowy klient" w innym widoku.
+let _consentSelectedClientId=null;
+let _fClSrchTimer=null;
+
+function searchClientForConsent(q){
+  clearTimeout(_fClSrchTimer);
+  const box=document.getElementById("fClResults");
+  if(!box)return;
+  q=(q||"").trim().toLowerCase();
+  if(q.length<2){box.style.display="none";box.innerHTML="";return;}
+  _fClSrchTimer=setTimeout(async()=>{
+    const cls=await dbGetAll("clients");
+    const matched=cls.filter(c=>{
+      const n=(c.name||"").toLowerCase();
+      const p=(c.phone||"").replace(/\s/g,"").toLowerCase();
+      return n.includes(q)||p.includes(q.replace(/\s/g,""));
+    }).slice(0,8); // ograniczamy listę żeby UX był szybki
+    if(!matched.length){
+      box.innerHTML='<div style="padding:8px;font:400 11px var(--fb);color:var(--t2)">Brak wyników. <button class="b b1 bsm" onclick="openNewClientForConsent()">➕ Dodaj nowego</button></div>';
+    }else{
+      box.innerHTML=matched.map(c=>'<div class="cal-res-item" onclick="pickClientForConsent('+c.id+')" style="cursor:pointer"><div class="crn">'+esc(c.name)+'</div><div class="crd">'+(c.phone?'📞 '+esc(c.phone):'')+(c.dob?' · 🎂 '+esc(c.dob):'')+'</div></div>').join("");
+    }
+    box.style.display="block";
+  },200);
+}
+
+async function pickClientForConsent(cid){
+  // Wpisuje dane klienta do pól formularza BEZ przebudowy renderForm.
+  const cls=await dbGetAll("clients");
+  const c=cls.find(x=>x.id===cid);
+  if(!c){toast("Nie znaleziono klienta");return;}
+  _consentSelectedClientId=cid;
+  const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v||"";};
+  setVal("fN",c.name);setVal("fP",c.phone);setVal("fE",c.email);setVal("fA",c.address);setVal("fPe",c.pesel);
+  if(c.dob)dobPickerSetValue("fD",c.dob);
+  const srch=document.getElementById("fClSrch");if(srch)srch.value=c.name+(c.phone?" ("+c.phone+")":"");
+  const box=document.getElementById("fClResults");if(box){box.style.display="none";box.innerHTML="";}
+  toast("✓ Dane klienta wstawione");
+}
+
+function openNewClientForConsent(){
+  // Specjalny tryb modal-u który po zapisie klienta NIE zamyka formularza zgody,
+  // tylko wstawia świeżo utworzonego klienta do pól. _bkReturnCtx=null żeby standardowa
+  // ścieżka saveClientFromModal wzięła nasz hook poniżej.
+  const returnTo={type:"consent"};
+  openClientForm(null,returnTo);
+}
 function setCI(btn){const id=btn.dataset.id,y=btn.dataset.v==="1",ci=document.getElementById("ci_"+id);ci.querySelectorAll(".rg button").forEach(b=>b.classList.remove("st","sn"));ci.classList.remove("cy");if(y){btn.classList.add("st");ci.classList.add("cy");ci.dataset.val="TAK";}else{btn.classList.add("sn");ci.dataset.val="NIE";}}
 
 function validate(){
@@ -2574,9 +2670,25 @@ async function showApt(id){
   const a=appts.find(x=>x.id===id);if(!a)return;
   const cl=cls.find(c=>c.id===a.clientId);
   const fn=(cl?.name||"").split(" ")[0];
-  let h='<h3>Wizyta #'+id+'</h3>';
-  h+='<p style="font:600 13px var(--fb)">'+esc(cl?.name||"")+'</p>';
-  h+='<p style="font:300 10px var(--fb);color:var(--t2)">'+(cl?.phone||"")+(cl?.email?" · "+cl.email:"")+'</p>';
+  const today=new Date().toISOString().split("T")[0];
+  // FIX 6: Inne nadchodzące wizyty tego klienta — kosmetolog często chce wiedzieć
+  // czy klient ma kolejne wizyty zaplanowane (np. seria zabiegów).
+  const otherAppts=cl?appts.filter(x=>
+    x.clientId===cl.id && x.id!==id && x.date>=today
+  ).sort((x,y)=>(x.date+x.time).localeCompare(y.date+y.time)):[];
+  // Czy ta wizyta jest częścią serii?
+  const isPartOfSeries=!!a.seriesId;
+  let seriesAppts=[];
+  if(isPartOfSeries){
+    seriesAppts=appts.filter(x=>x.seriesId===a.seriesId&&x.date>=today).sort((x,y)=>(x.date+x.time).localeCompare(y.date+y.time));
+  }
+  let h='<h3>Wizyta #'+id+(isPartOfSeries?' <span style="font:300 9px var(--fb);background:var(--sb);color:var(--sc);padding:2px 6px;border-radius:8px;vertical-align:middle">📋 część serii</span>':'')+'</h3>';
+  // Klient — z linkiem do profilu (FIX 6)
+  h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">';
+  h+='<div style="flex:1;min-width:160px"><p style="font:600 13px var(--fb);margin:0">'+esc(cl?.name||"")+'</p>';
+  h+='<p style="font:300 10px var(--fb);color:var(--t2);margin:2px 0">'+(cl?.phone||"")+(cl?.email?" · "+esc(cl.email):"")+'</p></div>';
+  if(cl)h+='<button class="b b1 bsm" onclick="closeMo();showDet('+cl.id+')" title="Otwórz pełen profil klienta">👤 Profil klienta</button>';
+  h+='</div>';
   h+='<div style="margin:8px 0;padding:8px;background:var(--bg);border-radius:var(--rs)">';
   h+='<p style="font:500 11px var(--fb)">📅 '+a.date+' o '+a.time+' ('+a.duration+' min)</p>';
   h+='<p style="font:400 11px var(--fb)">'+esc(a.treatment)+(a.price?" · "+a.price+" PLN":"")+'</p></div>';
@@ -2587,6 +2699,20 @@ async function showApt(id){
     h+='<p>🔄 '+esc(mi.repeat)+'</p>';
     if(mi.recs)h+='<p><strong>Zalecenia:</strong> '+esc(mi.recs)+'</p>';
     if(mi.contras)h+='<p style="color:var(--dn)"><strong>Przeciwwskazania:</strong> '+esc(mi.contras)+'</p>';
+    h+='</div>';
+  }
+  // Inne nadchodzące wizyty klienta (FIX 6)
+  if(otherAppts.length){
+    h+='<div class="ct" style="font-size:10px;margin-top:10px">📋 Inne nadchodzące wizyty tego klienta ('+otherAppts.length+')</div>';
+    h+='<div style="background:var(--bg2);border-radius:var(--rs);padding:6px 8px;font:400 10px var(--fb);max-height:140px;overflow-y:auto">';
+    otherAppts.slice(0,8).forEach(o=>{
+      const sameSer=o.seriesId&&o.seriesId===a.seriesId;
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--bd)">';
+      h+='<div><strong>'+esc(o.date)+' '+esc(o.time)+'</strong>'+(sameSer?' <span style="color:var(--sc);font:400 8px var(--fb)">[ta sama seria]</span>':'')+'<br><span style="color:var(--t2)">'+esc(o.treatment||"")+'</span></div>';
+      h+='<button class="b b2 bsm" onclick="closeMo();setTimeout(()=>showApt('+o.id+'),100)" title="Otwórz tę wizytę">→</button>';
+      h+='</div>';
+    });
+    if(otherAppts.length>8)h+='<div style="font:300 9px var(--fb);color:var(--t2);text-align:center;padding:4px">+'+(otherAppts.length-8)+' więcej w profilu klienta</div>';
     h+='</div>';
   }
   h+='<div class="apt-actions">';
@@ -2604,6 +2730,10 @@ async function showApt(id){
     h+='<a class="b bo bsm" href="sms:'+esc(cl.phone)+'?body='+encodeURIComponent(cancelTxt)+'" target="_blank" onclick="delAptSilent('+id+')">❌ Odwołaj + SMS</a>';
   }
   h+='<button class="b bd bsm" onclick="delApt('+id+')">🗑 Usuń</button>';
+  // FIX 6: Odwołanie całej serii — jeśli wizyta jest częścią serii i są >=2 nadchodzące
+  if(isPartOfSeries&&seriesAppts.length>=2){
+    h+='<button class="b bd bsm" onclick="cancelSeries(\''+a.seriesId+'\','+(cl?cl.id:"null")+')" title="Odwołaj wszystkie nadchodzące wizyty z tej serii ('+seriesAppts.length+')">❌ Odwołaj całą serię ('+seriesAppts.length+')</button>';
+  }
   h+='</div>';
   // Box zmiany terminu (ukryty)
   h+='<div id="reschBox_'+id+'" class="resch-box" style="display:none">';
@@ -2617,6 +2747,39 @@ async function showApt(id){
   h+='<div class="brow"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
   document.getElementById("modC").innerHTML=h;
   document.getElementById("modal").classList.add("on");
+}
+
+// Odwołaj całą serię — usuwa WSZYSTKIE nadchodzące wizyty z danym seriesId.
+// Wysyłamy też SMS do klienta z informacją o anulowaniu serii (jeśli ma telefon).
+// UWAGA: nie usuwamy wizyt już odbytych (data < dziś) — to jest historia.
+async function cancelSeries(seriesId,clientId){
+  if(!seriesId){toast("Brak ID serii");return;}
+  const today=new Date().toISOString().split("T")[0];
+  const appts=await dbGetAll("appointments");
+  const seriesUpcoming=appts.filter(a=>a.seriesId===seriesId&&a.date>=today);
+  if(!seriesUpcoming.length){toast("Brak nadchodzących wizyt w tej serii");return;}
+  const cls=await dbGetAll("clients");
+  const cl=clientId?cls.find(c=>c.id===clientId):null;
+  // Konfirmacja z listą wizyt do odwołania
+  const list=seriesUpcoming.slice(0,5).map(a=>"• "+a.date+" "+a.time+" ("+a.treatment+")").join("\n");
+  const more=seriesUpcoming.length>5?"\n... oraz "+(seriesUpcoming.length-5)+" więcej":"";
+  const confirmMsg="Odwołać "+seriesUpcoming.length+" nadchodzących wizyt z tej serii?\n\n"+list+more+"\n\nTej operacji nie można cofnąć.";
+  if(!confirm(confirmMsg))return;
+  // SMS PRZED usunięciem (żeby kosmetolog miał możliwość wysłania)
+  if(cl?.phone&&confirm("Wysłać SMS do "+cl.name+" o anulowaniu serii?")){
+    const fn=(cl.name||"").split(" ")[0];
+    const treatName=seriesUpcoming[0].treatment||"zabieg";
+    const txt="Dzien dobry "+fn+", informujemy o odwolaniu serii "+seriesUpcoming.length+" wizyt ("+treatName+") w Gabinecie Magda Maczynska. Prosimy o kontakt w celu umowienia nowych terminow. Tel: 503672015";
+    window.open("sms:"+cl.phone+"?body="+encodeURIComponent(txt));
+  }
+  // Usuń wszystkie wizyty z serii — sekwencyjnie żeby renderCal nie migotał
+  let removed=0;
+  for(const a of seriesUpcoming){
+    try{await dbDel("appointments",a.id);supaDelete("appointments",a.id);removed++;}
+    catch(e){console.warn("cancelSeries:",a.id,e);}
+  }
+  closeMo();renderCal();
+  toast("✓ Odwołano "+removed+" wizyt z serii");
 }
 function openReschedule(id){const b=document.getElementById("reschBox_"+id);if(b)b.style.display=b.style.display==="none"?"block":"none";}
 async function _doReschedule(id,withSMS){
@@ -3936,14 +4099,17 @@ async function importStockFromFile(input){
 function renderMenuList(){
   const el=document.getElementById("menuContent");
   const q=(document.getElementById("menuSrch")?.value||"").toLowerCase();
-  const filtered=q?FM.filter(m=>(m.name||"").toLowerCase().includes(q)||(m.cat||"").toLowerCase().includes(q)):FM;
+  // Pokaż ukryte tylko gdy user explicite kliknie "Pokaż ukryte" (zarządza HIDDEN_TREATMENTS_KEY)
+  const showHidden=document.getElementById("menuShowHidden")?.checked||false;
+  let base=showHidden?FM:FM.filter(m=>!m._hidden);
+  const filtered=q?base.filter(m=>(m.name||"").toLowerCase().includes(q)||(m.cat||"").toLowerCase().includes(q)):base;
   let h='';let lastCat="";
   filtered.forEach((m,idx)=>{
     const realIdx=FM.indexOf(m);
     if(m.cat!==lastCat){h+='<div class="menu-cat">'+esc(m.cat)+'</div>';lastCat=m.cat;}
-    h+='<div class="menu-item'+(m._custom?' custom':'')+(m._priceOverridden?' price-override':'')+'" data-idx="'+realIdx+'" onclick="toggleMenuItem(this,event)">';
+    h+='<div class="menu-item'+(m._custom?' custom':'')+(m._priceOverridden?' price-override':'')+(m._hidden?' hidden-item':'')+'" data-idx="'+realIdx+'" onclick="toggleMenuItem(this,event)" style="'+(m._hidden?'opacity:.55;border-style:dashed':'')+'">';
     const priceLabel=esc(m.price)+' PLN'+(m._priceOverridden?' <span style="font:300 8px var(--fb);color:var(--wn)">*</span>':'');
-    h+='<div class="mi-head"><div class="mi-name">'+(m._custom?'✏️ ':'')+esc(m.name)+(m._custom?' <span style="font:300 8px var(--fb);color:var(--g);text-transform:uppercase">własny</span>':'')+'</div><div class="mi-price">'+priceLabel+'</div></div>';
+    h+='<div class="mi-head"><div class="mi-name">'+(m._custom?'✏️ ':'')+(m._hidden?'🚫 ':'')+esc(m.name)+(m._custom?' <span style="font:300 8px var(--fb);color:var(--g);text-transform:uppercase">własny</span>':'')+(m._hidden?' <span style="font:300 8px var(--fb);color:var(--dn);text-transform:uppercase">ukryty</span>':'')+'</div><div class="mi-price">'+priceLabel+'</div></div>';
     h+='<div class="mi-meta"><span>⏱ '+esc(m.durTxt)+'</span><span>🔄 '+esc(m.repeat)+'</span>'+(m._priceOverridden?'<span style="color:var(--wn)">* cena zmieniona lokalnie</span>':'')+'</div>';
     h+='<div class="mi-details">';
     if(m.recs){h+='<div class="mi-section"><div class="mi-section-title">Zalecenia przed i po</div><p>'+esc(m.recs)+'</p></div>';}
@@ -3951,16 +4117,32 @@ function renderMenuList(){
     const consent=T.find(t=>t.id===m.consentId);
     if(consent){h+='<div class="mi-section"><div class="mi-section-title">Formularz zgody</div><p>'+esc(consent.name)+'</p></div>';}
     if(m.kasa){h+='<div style="font:300 8px var(--fb);color:var(--t2)">Nr kasy: '+m.kasa+'</div>';}
-    // Book + Plan series
-    h+='<div style="display:flex;gap:6px;margin-top:8px"><button class="mi-book" style="flex:1" onclick="bookFromMenu('+realIdx+')">📅 Umów termin</button><button class="b b1 bsm" style="flex:1" onclick="event.stopPropagation();planFromMenu('+realIdx+')">📋 Zaplanuj serię</button></div>';
-    // Edycja ceny — dla każdego zabiegu (custom i built-in); dla custom pełna edycja osobnym przyciskiem
-    h+='<div style="display:flex;gap:6px;margin-top:4px"><button class="b b2 bsm" style="flex:1" onclick="event.stopPropagation();openPriceEditor('+realIdx+')">💰 Zmień cenę</button>';
-    if(m._priceOverridden){h+='<button class="b b2 bsm" onclick="event.stopPropagation();resetPriceOverride('+realIdx+')" title="Przywróć cenę z cennika">↺</button>';}
-    h+='</div>';
-    if(m._custom){h+='<div style="display:flex;gap:6px;margin-top:4px"><button class="b b2 bsm" style="flex:1" onclick="event.stopPropagation();openTreatmentForm(\''+m._id+'\',null)">✏️ Edytuj wszystko</button><button class="b bd bsm" style="flex:1" onclick="event.stopPropagation();deleteCustomTreatment(\''+m._id+'\')">🗑 Usuń</button></div>';}
+    if(!m._hidden){
+      // Book + Plan series
+      h+='<div style="display:flex;gap:6px;margin-top:8px"><button class="mi-book" style="flex:1" onclick="bookFromMenu('+realIdx+')">📅 Umów termin</button><button class="b b1 bsm" style="flex:1" onclick="event.stopPropagation();planFromMenu('+realIdx+')">📋 Zaplanuj serię</button></div>';
+      h+='<div style="display:flex;gap:6px;margin-top:4px"><button class="b b2 bsm" style="flex:1" onclick="event.stopPropagation();openPriceEditor('+realIdx+')">💰 Zmień cenę</button>';
+      if(m._priceOverridden){h+='<button class="b b2 bsm" onclick="event.stopPropagation();resetPriceOverride('+realIdx+')" title="Przywróć cenę z cennika">↺</button>';}
+      h+='</div>';
+      if(m._custom){
+        h+='<div style="display:flex;gap:6px;margin-top:4px"><button class="b b2 bsm" style="flex:1" onclick="event.stopPropagation();openTreatmentForm(\''+m._id+'\',null)">✏️ Edytuj wszystko</button><button class="b bd bsm" style="flex:1" onclick="event.stopPropagation();deleteCustomTreatment(\''+m._id+'\')">🗑 Usuń</button></div>';
+      }else{
+        // FIX 5: dla built-in dajemy "Ukryj" zamiast "Usuń" — żeby kosmetolożka mogła wyczyścić
+        // listę zabiegów których nie wykonuje, ale dane (przypisanie do consents) zostają w bazie kodu.
+        h+='<div style="display:flex;gap:6px;margin-top:4px"><button class="b bd bsm" style="flex:1" onclick="event.stopPropagation();hideBuiltinTreatment('+realIdx+')" title="Ukryj zabieg z listy. Możesz go przywrócić w Ustawieniach.">🚫 Ukryj zabieg</button></div>';
+      }
+    }else{
+      // Pokazujemy tylko Przywróć przy ukrytych
+      h+='<div style="display:flex;gap:6px;margin-top:8px"><button class="b b1 bsm" style="flex:1" onclick="event.stopPropagation();unhideBuiltinTreatment(\''+_hiddenTreatmentKey(m).replace(/'/g,"\\'")+'\')">↺ Przywróć</button></div>';
+    }
     h+='</div></div>';
   });
   if(!filtered.length)h='<div style="text-align:center;padding:20px;font:300 11px var(--fb);color:var(--t2)">Brak wyników</div>';
+  // Pasek z przełącznikiem "Pokaż ukryte" — jeśli istnieją ukryte
+  const hiddenCount=FM.filter(m=>m._hidden).length;
+  if(hiddenCount>0){
+    const tip='<div style="padding:6px 8px;background:var(--bg2);border-radius:var(--rs);font:400 10px var(--fb);margin-bottom:8px"><label class="cc" style="display:inline-flex;cursor:pointer"><input type="checkbox" id="menuShowHidden"'+(showHidden?" checked":"")+' onchange="renderMenuList()" style="accent-color:var(--g);width:16px;height:16px;margin-right:4px"><span>Pokaż także ukryte zabiegi ('+hiddenCount+')</span></label></div>';
+    h=tip+h;
+  }
   el.innerHTML=h;
 }
 function toggleMenuItem(el,e){
@@ -5221,14 +5403,86 @@ let _bkReturnCtx=null; // pamięta kontekst rezerwacji gdy skaczemy do formularz
 const CUSTOM_MENU_KEY="_customMenuV1";
 function loadCustomTreatments(){
   try{
-    const raw=localStorage.getItem(CUSTOM_MENU_KEY);if(!raw)return;
+    const raw=localStorage.getItem(CUSTOM_MENU_KEY);if(!raw){_applyHiddenTreatments();return;}
     const arr=JSON.parse(raw);if(!Array.isArray(arr))return;
     arr.forEach(m=>{m._custom=true;FM.push(m);});
     FM.sort((a,b)=>(a.cat||"").localeCompare(b.cat||""));
   }catch(e){console.warn("[custom menu] load fail:",e.message);}
+  _applyHiddenTreatments();
 }
 function saveCustomTreatments(){
   try{localStorage.setItem(CUSTOM_MENU_KEY,JSON.stringify(FM.filter(m=>m._custom)));}catch(e){toast("Brak miejsca w localStorage");}
+}
+
+// FIX 5: Ukrywanie wbudowanych zabiegów (soft delete).
+// Wbudowane zabiegi pochodzą z FM kodu — nie można ich naprawdę usunąć (po reinstalu wrócą),
+// ale można je oznaczyć jako ukryte w localStorage i odfiltrować z UI.
+// Custom zabiegi można usuwać bez trampoliny (deleteCustomTreatment).
+const HIDDEN_TREATMENTS_KEY="_hiddenBuiltinTreatmentsV1";
+function _hiddenTreatmentKey(m){return (m.cat||"")+"::"+(m.name||"");}
+function _loadHiddenTreatments(){
+  try{const raw=localStorage.getItem(HIDDEN_TREATMENTS_KEY);return raw?new Set(JSON.parse(raw)):new Set();}
+  catch(_){return new Set();}
+}
+function _saveHiddenTreatments(s){try{localStorage.setItem(HIDDEN_TREATMENTS_KEY,JSON.stringify([...s]));}catch(e){toast("Brak miejsca w localStorage");}}
+function _applyHiddenTreatments(){
+  // Oznacza zabiegi jako _hidden — renderMenuList i wybór w consent filtrują po tym polu.
+  const hidden=_loadHiddenTreatments();
+  FM.forEach(m=>{m._hidden=!m._custom&&hidden.has(_hiddenTreatmentKey(m));});
+}
+function hideBuiltinTreatment(idx){
+  const m=FM[idx];
+  if(!m||m._custom){toast("Custom zabiegi usuwa się przez 🗑");return;}
+  if(!confirm('Ukryć zabieg "'+m.name+'"? Możesz go przywrócić w Ustawieniach.\nHistoria wizyt z tą nazwą pozostanie nietknięta.'))return;
+  const hidden=_loadHiddenTreatments();
+  hidden.add(_hiddenTreatmentKey(m));
+  _saveHiddenTreatments(hidden);
+  m._hidden=true;
+  toast("Ukryto ✓");
+  if(document.getElementById("vMenu")?.classList.contains("on"))renderMenuList();
+  // Odśwież dropdown wyboru zabiegu w viewConsent — żeby ukryty nie był w liście
+  _rebuildTreatmentSelect();
+}
+function unhideBuiltinTreatment(key){
+  const hidden=_loadHiddenTreatments();
+  hidden.delete(key);
+  _saveHiddenTreatments(hidden);
+  FM.forEach(m=>{if(_hiddenTreatmentKey(m)===key)m._hidden=false;});
+  toast("Przywrócono ✓");
+  if(document.getElementById("vMenu")?.classList.contains("on"))renderMenuList();
+  showHiddenTreatmentsModal(); // odśwież listę
+  _rebuildTreatmentSelect();
+}
+function showHiddenTreatmentsModal(){
+  const hidden=_loadHiddenTreatments();
+  const list=FM.filter(m=>!m._custom&&hidden.has(_hiddenTreatmentKey(m)));
+  let h='<h3>🚫 Ukryte zabiegi ('+list.length+')</h3>';
+  if(!list.length){
+    h+='<div class="db" style="background:var(--bg2);text-align:center">Żaden wbudowany zabieg nie jest ukryty.</div>';
+  }else{
+    h+='<div class="db" style="background:var(--bg2);font:300 10px var(--fb)">Kliknij "↺ Przywróć" aby zabieg ponownie pojawił się w menu i formularzu zgody.</div>';
+    list.forEach(m=>{
+      const k=_hiddenTreatmentKey(m);
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px solid var(--bd)"><div><div style="font:600 11px var(--fb)">'+esc(m.name)+'</div><div style="font:300 9px var(--fb);color:var(--t2)">'+esc(m.cat||"")+'</div></div>';
+      h+='<button class="b b1 bsm" onclick="unhideBuiltinTreatment(\''+k.replace(/'/g,"\\'")+'\')">↺ Przywróć</button></div>';
+    });
+  }
+  h+='<div class="brow"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+}
+function _rebuildTreatmentSelect(){
+  // Po zmianie listy ukrytych — przebuduj <select id="tSel"> w viewConsent.
+  // T (zgodnie z architekturą KB) jest osobną listą szablonów zgód, a FM mapuje
+  // zabieg → consentId. Filtrujemy T po szablonach używanych przez FM nieukryte.
+  const sel=document.getElementById("tSel");if(!sel)return;
+  const cur=sel.value;
+  const usedConsentIds=new Set(FM.filter(m=>!m._hidden).map(m=>m.consentId).filter(Boolean));
+  // Pokaż tylko te szablony T które są używane przez nieukryte zabiegi LUB nie mają mapowania (np. RODO)
+  const standalone=new Set(["zgoda_rodo","zgoda_foto","zgoda_marketing"]); // szablony pokazywane zawsze
+  const visibleT=T.filter(t=>standalone.has(t.id)||usedConsentIds.has(t.id));
+  sel.innerHTML='<option value="">— Wybierz zabieg —</option>'+visibleT.map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>').join("");
+  if(cur)sel.value=cur;
 }
 
 // ---------- PRICE OVERRIDES (built-in + custom, localStorage) ----------
@@ -5350,6 +5604,19 @@ async function saveClientFromModal(cid){
       _bkClients=allCl.concat([]); // odśwież cache
       dbGetAll("clients").then(x=>{_bkClients=x;});
     },120);
+  }else if(ctx&&ctx.type==="consent"){
+    // FIX 3: powrót do formularza zgody z wpisanymi danymi nowo utworzonego klienta.
+    // tSel.value, cur, photos, draft — wszystko zostaje nietknięte bo nie wywołujemy renderForm.
+    closeMo();
+    setTimeout(()=>{
+      _consentSelectedClientId=savedId;
+      const setVal=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v||"";};
+      setVal("fN",name);setVal("fP",phone);setVal("fE",email);setVal("fA",address);setVal("fPe",pesel);
+      if(dob)dobPickerSetValue("fD",dob);
+      const srch=document.getElementById("fClSrch");if(srch)srch.value=name+(phone?" ("+phone+")":"");
+      const box=document.getElementById("fClResults");if(box){box.style.display="none";box.innerHTML="";}
+      toast("✓ Klient dodany — możesz kontynuować zgodę");
+    },150);
   }else{
     closeMo();
     if(document.getElementById("vClients")?.classList.contains("on"))loadCl();
@@ -5589,12 +5856,22 @@ async function globalFullSync(showProgress=true){
       cloudPrIds.add(r.local_id);
       const local=localPrMap[r.local_id];
       const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;
+      // Każdy produkt który JEST w chmurze → oznacz lokalnie jako _syncedAt.
+      // To naprawia DELETE-sync dla starych instalacji (przed v1.2.1) gdzie
+      // produkty zostały zaimportowane przed wprowadzeniem flagi i nie miały
+      // możliwości być oznaczone jako "kiedyś w chmurze".
+      rec._syncedAt=local?._syncedAt||new Date().toISOString();
       if(!local){
         await dbAdd("products",rec).catch(()=>{});pulled++;
       }else if((r.updatedAt||"")>(local.updatedAt||"")){
         // Cloud jest nowszy — zaktualizuj lokalny (zachowaj niezsynchronizowane pola)
         Object.assign(local,rec);
         await dbPut("products",local).catch(()=>{});pulled++;
+      }else if(!local._syncedAt){
+        // Lokalny nowszy lub równy, ale brak flagi _syncedAt — uzupełnij ją milcząco
+        // żeby globalFullSync DELETE działał na tym produkcie od następnego sync.
+        local._syncedAt=new Date().toISOString();
+        await dbPut("products",local).catch(()=>{});
       }
     }
     // KASOWANIE LOKALNE: produkty które kiedyś były synchronizowane z chmurą,

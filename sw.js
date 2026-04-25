@@ -1,6 +1,15 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.1  |  2026-04-25
+ *  Wersja: 1.2.2  |  2026-04-25
+ *  Zmiany v1.2.2 (UX hotfix po teście):
+ *   • Auto-mark _syncedAt dla starych produktów (DELETE-sync działa od 1. sync)
+ *   • Po reload zawsze pierwotny panel (vConsent) z czystym formularzem
+ *   • W formularzu zgody: wyszukiwarka klienta z bazy + przycisk "Nowy klient"
+ *     bez utraty wybranego zabiegu
+ *   • Zmiana zabiegu zachowuje wpisane dane klienta
+ *   • Soft-hide wbudowanych zabiegów (zarządzanie z menu i Ustawień)
+ *   • Wizyta w kalendarzu: link do profilu klienta + lista innych wizyt
+ *     + odwołanie całej serii zabiegów ze SMS-em
  *  Zmiany v1.2.1 (hotfix):
  *   • Synchronizacja DELETE produktów między urządzeniami (REPLICA IDENTITY FULL)
  *   • Bulk-delete produktów w magazynie
@@ -25,7 +34,7 @@
 "use strict";
 
 // BUMPUJ WERSJĘ przy każdej zmianie app-shell żeby wymusić odświeżenie cache
-const CACHE_VERSION = "v1.2.1";
+const CACHE_VERSION = "v1.2.2";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
