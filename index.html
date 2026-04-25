@@ -1419,24 +1419,27 @@ document.addEventListener("DOMContentLoaded",()=>{
   // Jeśli nie ma konfiguracji PIN i nie ma sesji Supabase → pozwól na szybki dostęp
   // (mode selector zostanie pokazany, użytkownik wybiera)
 
-  // Po pełnym wczytaniu DOM — wymuś widok pierwotny (Nowa zgoda) z czystym formularzem.
-  // Robimy to ZAWSZE po reload, niezależnie od poprzedniego stanu w DOM:
-  //   • brak "zawieszonych" widoków typu vDetail/vCal po F5
-  //   • zerwany kontekst zabiegu/klienta = czyste pole startu dla kosmetolożki
-  //   • _viewStack zerwany (nie ma do czego wracać)
+  // Po pełnym wczytaniu DOM — przywróć ostatni widok z sessionStorage (FIX 3).
+  // W obrębie sesji przeglądarki F5 wraca do tego samego widoku.
+  // W nowej sesji (zamknięcie/otwarcie taba) — domyślnie vConsent (zerowy stan).
   // Wykonujemy w setTimeout żeby reszta inicjalizacji (T.forEach, eventy) się dokończyła.
   setTimeout(()=>{
     if(document.body.classList.contains("kiosk-mode"))return; // nie przeszkadzaj klientowi w kiosku
-    const tSel=document.getElementById("tSel");if(tSel)tSel.value="";
-    const tSrch=document.getElementById("tSrch");if(tSrch)tSrch.value="";
-    if(typeof renderForm==="function")renderForm(); // czyści fC i subC, resetuje cur
-    if(typeof _viewStack!=="undefined")_viewStack.length=0; // po reload nie ma "wstecz"
-    // Pokaż widok zgody (defaultowy w HTML, ale dla pewności)
-    if(!document.getElementById("vConsent").classList.contains("on")){
-      document.querySelectorAll(".vw").forEach(e=>e.classList.remove("on"));
-      document.getElementById("vConsent").classList.add("on");
-      document.querySelectorAll(".nav button[data-v]").forEach(b=>b.classList.toggle("on",b.dataset.v==="consent"));
+    let lastView=null;
+    try{lastView=sessionStorage.getItem("_lastView");}catch(_){}
+    const validViews=["consent","clients","detail","calendar","stats","settings","menu","stock"];
+    // detail wymaga klienta — bez ID nie ma sensu wracać; zamiast tego idzie do clients
+    if(lastView==="detail")lastView="clients";
+    if(lastView&&validViews.includes(lastView)&&lastView!=="consent"){
+      // Wykonaj showV ale BEZ pushu na stos (to nie jest "nawigacja", tylko restore)
+      showV(lastView,{skipPush:true});
+    }else{
+      // Brak zapamiętanego widoku albo to consent → standardowy reset formularza zgody
+      const tSel=document.getElementById("tSel");if(tSel)tSel.value="";
+      const tSrch=document.getElementById("tSrch");if(tSrch)tSrch.value="";
+      if(typeof renderForm==="function")renderForm();
     }
+    if(typeof _viewStack!=="undefined")_viewStack.length=0; // po reload nie ma "wstecz"
     if(typeof updBackBtn==="function")updBackBtn();
   },80);
 });
@@ -1460,6 +1463,11 @@ const _VIEW_STACK_MAX=20;
 function showV(v,opts){
   if(document.body.classList.contains("kiosk-mode"))return; // blokada w trybie kiosk
   opts=opts||{};
+  // FIX 3: Zapisz aktualny widok w sessionStorage żeby po F5 wrócić do tego samego.
+  // sessionStorage (a nie localStorage) → wraca tylko w obrębie sesji przeglądarki;
+  // zamknięcie taba = czysty start. To dobre UX bo: kosmetolog odświeża → zostaje gdzie był,
+  // ale jeśli jutro otworzy aplikację od nowa → ekran startowy (Nowa zgoda).
+  try{sessionStorage.setItem("_lastView",v);}catch(_){}
   const cur=document.querySelector(".vw.on")?.id;
   const curKey={vConsent:"consent",vClients:"clients",vDetail:"detail",vCal:"calendar",vStats:"stats",vSettings:"settings",vMenu:"menu",vStock:"stock"}[cur];
   // Push tylko jeśli: nie jesteśmy w trakcie "wracania", aktualny widok istnieje, i nie idziemy na ten sam widok
@@ -1791,8 +1799,13 @@ function renderForm(){
   h+='<div class="cd"><div class="ct">RODO — dane osobowe <span class="rq">*</span></div>';
   h+='<label class="cc"><input type="checkbox" id="chkR" data-rq><span><strong>Wyrażam zgodę</strong> na przetwarzanie moich danych osobowych w celu wykonania zabiegu i prowadzenia dokumentacji zabiegowej.<br><span style="font:300 9px var(--fb);color:var(--t2)">Administrator: Gabinet Magda Mączyńska, ul. Okrąg 46, 87-600 Lipno. Dane przechowywane zgodnie z RODO (UE) 2016/679 i UODO. Kontakt: kosmetolog.maczynska@gmail.com</span></span></label>';
   h+='</div>';
+  // FIX 2: Sekcje zgód marketing/wizerunek mogą być wstępnie wypełnione na podstawie
+  // wcześniejszych wpisów tego klienta. Wrapper ma id consentSectionsWrapper żeby
+  // applyExistingConsents() mogło je odświeżyć po wybraniu klienta z bazy.
+  h+='<div id="consentSectionsWrapper">';
   // Marketing — DOBROWOLNY checkbox obok RODO (per zgoda, nie wymaga osobnego formularza zgoda_rodo)
-  h+='<div class="cd" style="background:var(--sb);border-left:3px solid var(--sc)"><div class="ct">📬 Zgoda marketingowa (dobrowolna)</div>';
+  h+='<div class="cd" id="cdMk" style="background:var(--sb);border-left:3px solid var(--sc)"><div class="ct">📬 Zgoda marketingowa (dobrowolna)</div>';
+  h+='<div id="prevMkInfo" style="display:none"></div>';
   h+='<label class="cc"><input type="checkbox" id="chkMk"><span><strong>Chcę otrzymywać komunikaty od Gabinetu Magda Mączyńska</strong>, w tym:<br>';
   h+='<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">';
   h+='• <strong>przypomnienia o nadchodzących wizytach</strong> (SMS/e-mail na 1 dzień przed)<br>';
@@ -1803,7 +1816,10 @@ function renderForm(){
   h+='<span style="font:300 9px var(--fb);color:var(--t2);display:block;margin-top:6px">📨 Komunikaty otrzymasz na <strong>telefon (SMS)</strong> oraz <strong>e-mail</strong> podane powyżej. Zgoda dobrowolna — bez niej nadal możesz korzystać z usług, ale nie będziemy Cię informować o promocjach. Wycofanie zgody w każdej chwili: kosmetolog.maczynska@gmail.com lub SMS "STOP" na 503 672 015. Podstawa: art. 6 ust. 1 lit. a RODO + art. 172 Prawa Telekomunikacyjnego + art. 10 UŚUDE.</span>';
   h+='</span></label>';
   h+='</div>';
-  h+='<div class="cd"><div class="ct">Wizerunek (opcja)</div><label class="cc"><input type="checkbox" id="chkWD"><span>Dokumentacja</span></label><label class="cc"><input type="checkbox" id="chkWM"><span>Marketing</span></label></div>';
+  h+='<div class="cd" id="cdWiz"><div class="ct">Wizerunek (opcja)</div>';
+  h+='<div id="prevWizInfo" style="display:none"></div>';
+  h+='<label class="cc"><input type="checkbox" id="chkWD"><span>Dokumentacja</span></label><label class="cc"><input type="checkbox" id="chkWM"><span>Marketing</span></label></div>';
+  h+='</div>';
   h+='<div class="cd"><div class="ct">Podpis klienta <span class="rq">*</span></div><div class="sw"><canvas id="sc1"></canvas><div class="sp" id="sp1">✍ Podpisz palcem lub penem</div></div><div class="brow"><button class="b b2 bsm" onclick="SP.c1&&SP.c1.clear()">Wyczyść</button></div></div>';
   h+='<div class="vmsg" id="vMsg"></div>';
   h+='<div class="cd no-print" id="step1Btns"><button class="b bs bbl" id="btnSv" onclick="clientSave()">✅ Potwierdzam i zapisuję zgodę</button> <button class="b b2 bsm kiosk-hide-inside" onclick="kioskEnter()" title="Ukryj nawigację i podaj tablet klientowi" style="margin-left:8px">🖥 Podaj tablet klientowi</button><div class="legal" id="lStamp" style="display:none"></div></div>';
@@ -1889,7 +1905,99 @@ async function pickClientForConsent(cid){
   if(c.dob)dobPickerSetValue("fD",c.dob);
   const srch=document.getElementById("fClSrch");if(srch)srch.value=c.name+(c.phone?" ("+c.phone+")":"");
   const box=document.getElementById("fClResults");if(box){box.style.display="none";box.innerHTML="";}
+  // FIX 2: pre-fill zgód marketingowych/wizerunku jeśli klient już je wcześniej wyrażał
+  await applyExistingConsents(cid);
   toast("✓ Dane klienta wstawione");
+}
+
+// Sprawdza historyczne zgody klienta i przygotowuje formularz tak, żeby NIE pytać
+// drugi raz o już wyrażone zgody marketingowe/wizerunkowe.
+// Logika:
+//   - Jeśli klient ma marketing=true w jakiejkolwiek zgodzie → pre-check chkMk + info
+//   - Jeśli wszystkie zgody (marketing + wizDok + wizMar) są już wyrażone →
+//     ukryj całą sekcję wrapperWizerunek/marketing (klient się nie męczy ponownie)
+//   - Jeśli brakuje TYLKO marketingu → pokaż TYLKO marketing (wiz ukryj)
+//   - Jeśli brakuje TYLKO wizerunku → pokaż TYLKO wiz (marketing ukryj)
+//   - Brakuje wszystkich → standardowy formularz (status quo)
+async function applyExistingConsents(cid){
+  if(!cid)return;
+  const cons=await dbGetAll("consents");
+  const clientCons=cons.filter(co=>co.clientId===cid);
+  if(!clientCons.length)return; // pierwsza zgoda → standardowy flow
+  // Aggreguj historyczne wybory (kiedykolwiek był TRUE = klient wyraził)
+  const has={
+    marketing:clientCons.some(co=>co.marketing),
+    wizDok:clientCons.some(co=>co.wizDok),
+    wizMar:clientCons.some(co=>co.wizMar)
+  };
+  const lastWith=(field)=>clientCons.filter(co=>co[field]).sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
+  const cdMk=document.getElementById("cdMk");
+  const cdWiz=document.getElementById("cdWiz");
+  const chkMk=document.getElementById("chkMk");
+  const chkWD=document.getElementById("chkWD");
+  const chkWM=document.getElementById("chkWM");
+  // Marketing — wyrażony wcześniej → pre-check + info, ukryj sekcję
+  if(has.marketing){
+    if(chkMk)chkMk.checked=true;
+    if(cdMk){
+      const last=lastWith("marketing");
+      const lastDate=last?.date||"";
+      cdMk.style.display="none";
+      // Informujemy kosmetologa (visible) o pominiętej sekcji — żeby wiedział że nie zapomniał
+      if(!document.getElementById("mkExistsBanner")){
+        const banner=document.createElement("div");
+        banner.id="mkExistsBanner";
+        banner.className="db";
+        banner.style.cssText="background:var(--sb);border-left:3px solid var(--sc);padding:8px 10px;margin-bottom:8px;font:400 10px var(--fb)";
+        banner.innerHTML='✅ <strong>Zgoda marketingowa</strong> już wyrażona przez tego klienta'+(lastDate?' (od '+lastDate+')':'')+'. Pominięto sekcję marketingową — checkbox jest automatycznie zaznaczony. <a href="#" onclick="event.preventDefault();_revokeConsent(\'marketing\','+cid+')" style="color:var(--dn);font-size:10px">Cofnij zgodę marketingową</a>';
+        cdMk.parentNode.insertBefore(banner,cdMk);
+      }
+    }
+  }
+  // Wizerunek — analogicznie. Tu są dwa flagi (chkWD, chkWM) — sekcja jako całość znika
+  // tylko jeśli OBA zostały wyrażone. Jeśli tylko jeden — sekcja zostaje, ale checkbox jest pre-checked.
+  if(has.wizDok&&chkWD)chkWD.checked=true;
+  if(has.wizMar&&chkWM)chkWM.checked=true;
+  if(has.wizDok&&has.wizMar&&cdWiz){
+    cdWiz.style.display="none";
+    if(!document.getElementById("wizExistsBanner")){
+      const banner=document.createElement("div");
+      banner.id="wizExistsBanner";
+      banner.className="db";
+      banner.style.cssText="background:var(--sb);border-left:3px solid var(--sc);padding:8px 10px;margin-bottom:8px;font:400 10px var(--fb)";
+      banner.innerHTML='✅ <strong>Zgody na wizerunek</strong> (dokumentacja + marketing) już wyrażone wcześniej. Pominięto sekcję. <a href="#" onclick="event.preventDefault();_revokeConsent(\'wizerunek\','+cid+')" style="color:var(--dn);font-size:10px">Cofnij zgody wizerunkowe</a>';
+      cdWiz.parentNode.insertBefore(banner,cdWiz);
+    }
+  }else if((has.wizDok||has.wizMar)&&cdWiz){
+    // Częściowa zgoda — sekcja zostaje, ale dodajemy info które już są wyrażone
+    if(!document.getElementById("wizPartialBanner")){
+      const banner=document.createElement("div");
+      banner.id="wizPartialBanner";
+      banner.className="db";
+      banner.style.cssText="background:var(--sb);border-left:3px solid var(--sc);padding:6px 10px;margin-bottom:6px;font:300 10px var(--fb)";
+      const list=[];if(has.wizDok)list.push("✅ Dokumentacja");if(has.wizMar)list.push("✅ Marketing");
+      banner.innerHTML='Wcześniej wyrażono: '+list.join(", ")+'. Możesz dodać brakujące zgody.';
+      cdWiz.insertBefore(banner,cdWiz.querySelector(".cc")||cdWiz.children[1]);
+    }
+  }
+}
+
+// Cofnięcie zgody — kosmetolog może odznaczyć checkbox jeśli klient teraz zmienił zdanie.
+// To NIE usuwa historycznej zgody z bazy (RODO wymaga zachowania) — tylko odznacza w bieżącym
+// formularzu. Faktyczne wycofanie zgody odbywa się przez kontakt z administratorem (e-mail).
+function _revokeConsent(type,cid){
+  if(!confirm("Klient chce cofnąć "+type+"?\n\nUWAGA: To odznaczy checkbox w bieżącym formularzu. Historyczne zgody w bazie pozostają (RODO). Pełne wycofanie zgody wymaga kontaktu z administratorem (kosmetolog.maczynska@gmail.com)."))return;
+  if(type==="marketing"){
+    const chkMk=document.getElementById("chkMk");if(chkMk)chkMk.checked=false;
+    const cdMk=document.getElementById("cdMk");if(cdMk)cdMk.style.display="";
+    const banner=document.getElementById("mkExistsBanner");if(banner)banner.remove();
+  }else if(type==="wizerunek"){
+    const chkWD=document.getElementById("chkWD");if(chkWD)chkWD.checked=false;
+    const chkWM=document.getElementById("chkWM");if(chkWM)chkWM.checked=false;
+    const cdWiz=document.getElementById("cdWiz");if(cdWiz)cdWiz.style.display="";
+    ["wizExistsBanner","wizPartialBanner"].forEach(id=>{const e=document.getElementById(id);if(e)e.remove();});
+  }
+  toast("Zgoda odznaczona — klient może wybrać ponownie");
 }
 
 function openNewClientForConsent(){
@@ -1971,47 +2079,120 @@ function kioskShowThankYou(){
     '<p style="font:400 16px var(--fb);color:var(--t2);line-height:1.6;margin-bottom:24px">'+
       'Formularz zgody został pomyślnie zapisany.<br>Proszę oddać tablet obsłudze.'+
     '</p>'+
-    '<div id="kioskCountdown" style="font:300 12px var(--fb);color:var(--t2);margin-bottom:16px">Tablet wróci do panelu kosmetologa za <span id="kCntNum">30</span> s.</div>'+
-    '<button class="b b2 bsm" onclick="kioskReturnToCosmo()" style="font:500 11px var(--fb)">↩ Wróć teraz do panelu kosmetologa</button>'+
+    // FIX 4: Wyraźny CTA dla kosmetologa — żeby nie utknąć na ekranie "Dziękujemy".
+    // Klient nie zna PINu więc ten przycisk dla niego nic nie robi (PIN-prompt go wyrzuca);
+    // kosmetolog wprowadza PIN i wchodzi do menu akcji.
+    '<div style="background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:20px;margin:0 auto;max-width:380px">'+
+    '<div style="font:600 13px var(--fb);color:var(--t);margin-bottom:8px">👤 Kosmetolog</div>'+
+    '<button class="b bs" style="width:100%;font:600 13px var(--fb);padding:12px" onclick="_kioskUnlockForCosmo()">🔓 Odblokuj — przejdź do panelu kosmetologa</button>'+
+    '<div style="font:300 9px var(--fb);color:var(--t2);margin-top:8px">Wymagany PIN aplikacji</div>'+
+    '</div>'+
+    '<div id="kioskCountdown" style="font:300 11px var(--fb);color:var(--t2);margin-top:16px">Po 60 s tablet automatycznie wróci do panelu kosmetologa: <span id="kCntNum">60</span> s</div>'+
     '</div>';
   window.scrollTo({top:0,behavior:"smooth"});
-  // Wydłużony odlicznik (30s) — daje klientce czas na oddanie tabletu kosmetolog,
-  // a kosmetolog ma chwilę zanim potrzebuje zdjąć tryb kiosku ręcznie.
-  let s=30;
+  // 60 sekund (3× pierwotne 20s) — daje klientce realny czas na oddanie tabletu, nie spieszy się
+  let s=60;
   const iv=setInterval(()=>{
     s--;
     const n=document.getElementById("kCntNum");
     if(n)n.textContent=s;
-    if(s<=0){clearInterval(iv);kioskReturnToCosmo();}
+    if(s<=0){clearInterval(iv);_kioskUnlockForCosmo(true);}
   },1000);
-  // Zachowaj ID timera żeby przycisk "Wróć teraz" mógł go zatrzymać
   window._kioskCountdownIv=iv;
+}
+
+// Odblokowanie z trybu klienta — wymagany PIN, chyba że timer auto-wygasnął.
+// Po sukcesie pokazuje menu akcji (gdzie kosmetolog wybiera co dalej).
+function _kioskUnlockForCosmo(byTimeout){
+  const savedPin=localStorage.getItem("pin");
+  // Jeśli PIN ustawiony i to NIE jest auto-wygaśnięcie → spytaj
+  if(savedPin&&!byTimeout){
+    const inp=prompt("Wprowadź PIN aplikacji aby odblokować tablet:");
+    if(inp===null)return; // anulowano
+    if(inp!==savedPin){toast("❌ Nieprawidłowy PIN");return;}
+  }
+  // Anuluj odlicznik
+  if(window._kioskCountdownIv){clearInterval(window._kioskCountdownIv);window._kioskCountdownIv=null;}
+  // Wyjście z trybu kiosku
+  document.body.classList.remove("kiosk-mode");
+  if(typeof _kioskBlockKeys==="function")window.removeEventListener("keydown",_kioskBlockKeys,true);
+  // Pokaż menu akcji kosmetologa
+  _showCosmoActionMenu();
+}
+
+// Menu akcji kosmetologa po podpisaniu zgody — daje wyraźne wybory co dalej.
+// Zamiast forsować przejście do panelu zabiegowego, pokazujemy opcje:
+//   1. 📸 Dodaj zdjęcia + parametry zabiegu (panel kosmetologa)
+//   2. 📄 Pełny podgląd podpisanej zgody (jak klient ją widział)
+//   3. ⚠ Pokaż przeciwwskazania zaznaczone TAK przez klienta
+//   4. 📅 Kalendarz (umów następną wizytę)
+//   5. 👤 Profil klienta
+//   6. 📝 Nowa zgoda (kolejny klient)
+function _showCosmoActionMenu(){
+  if(!savedConId){toast("⚠ Brak zapisanej zgody");return;}
+  // Pobierz zgodę żeby pokazać przeciwwskazania (jeśli są zaznaczone TAK)
+  dbGetAll("consents").then(cons=>{
+    const co=cons.find(x=>x.id===savedConId);
+    const taksCount=co?Object.values(co.checks||{}).filter(v=>v==="TAK").length:0;
+    let h='<h3>✅ Zgoda zapisana — co teraz?</h3>';
+    h+='<p style="font:400 11px var(--fb);color:var(--t2);margin-bottom:14px">Wybierz następny krok lub zamknij okno aby zostać w panelu kosmetologa.</p>';
+    if(taksCount>0){
+      h+='<div class="db" style="background:var(--db);border-left:3px solid var(--dn)"><strong>⚠ Uwaga:</strong> Klient zaznaczył <strong>'+taksCount+'</strong> przeciwwskazań/odpowiedzi TAK. Sprawdź przed zabiegiem.</div>';
+    }
+    h+='<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">';
+    h+='<button class="b bs" onclick="closeMo();_focusCosmoPanel()">📸 Dodaj zdjęcia, parametry i notatki <span style="font:300 9px var(--fb);opacity:.8;display:block">Panel kosmetologa — uzupełnij dokumentację zabiegową</span></button>';
+    h+='<button class="b b1" onclick="closeMo();setTimeout(()=>viewConsent('+savedConId+'),100)">📄 Pełny podgląd podpisanej zgody <span style="font:300 9px var(--fb);opacity:.8;display:block">Wszystkie dane, podpis, hash — tak jak klient ją podpisał</span></button>';
+    if(taksCount>0){
+      h+='<button class="b bw" onclick="closeMo();_showClientWarnings('+savedConId+')">⚠ Pokaż '+taksCount+' przeciwwskazań TAK <span style="font:300 9px var(--fb);opacity:.8;display:block">Tylko te które klient zaznaczył jako problemowe</span></button>';
+    }
+    h+='<button class="b b2" onclick="closeMo();showV(\'calendar\')">📅 Kalendarz — umów następną wizytę</button>';
+    h+='<button class="b b2" onclick="closeMo();showDet('+savedCid+')">👤 Profil klienta</button>';
+    h+='<button class="b b2" onclick="closeMo();newForm()">📝 Nowa zgoda dla kolejnego klienta</button>';
+    h+='</div>';
+    h+='<div class="brow" style="margin-top:14px;justify-content:center"><button class="b b2 bsm" onclick="closeMo()">Zamknij — zostań w panelu kosmetologa</button></div>';
+    document.getElementById("modC").innerHTML=h;
+    document.getElementById("modal").classList.add("on");
+  });
+}
+
+// Pokaż handover (legalStamp) i panel kosmetologa (cosmoP) — wraca do widoku zgody
+// w stanie "po zapisie", gdzie kosmetolog może uzupełnić zdjęcia i parametry.
+function _focusCosmoPanel(){
+  const handover=document.getElementById("handover");
+  const cosmoP=document.getElementById("cosmoP");
+  if(handover)handover.style.display="block";
+  if(cosmoP){cosmoP.style.display="block";cosmoP.scrollIntoView({behavior:"smooth"});}
+  setTimeout(()=>toast("📋 Uzupełnij zdjęcia przed/po, parametry i notatki",4000),300);
+}
+
+// Pokazuje TYLKO przeciwwskazania zaznaczone TAK przez klienta — kosmetolog widzi
+// natychmiast co potencjalnie blokuje/komplikuje zabieg.
+async function _showClientWarnings(conId){
+  const cons=await dbGetAll("consents");
+  const co=cons.find(x=>x.id===conId);
+  if(!co){toast("Nie znaleziono zgody");return;}
+  const taks=Object.entries(co.checks||{}).filter(([,v])=>v==="TAK").map(([k])=>k);
+  let h='<h3>⚠ Przeciwwskazania / odpowiedzi TAK ('+taks.length+')</h3>';
+  if(!taks.length){
+    h+='<div class="db">Klient nie zaznaczył żadnych przeciwwskazań.</div>';
+  }else{
+    h+='<div class="db" style="background:var(--db);border-left:3px solid var(--dn);font:500 11px var(--fb)"><strong>Zwróć uwagę przed zabiegiem:</strong></div>';
+    h+='<div style="background:var(--bg2);border-radius:var(--rs);padding:10px;font:400 12px var(--fb);max-height:60vh;overflow-y:auto">';
+    taks.forEach(t=>{h+='<div style="padding:6px 0;border-bottom:1px solid var(--bd);display:flex;align-items:flex-start;gap:8px"><span style="color:var(--dn);font-weight:700;flex-shrink:0">▸</span><span>'+esc(t)+'</span></div>';});
+    h+='</div>';
+  }
+  h+='<div class="brow" style="margin-top:10px"><button class="b b1" onclick="closeMo();setTimeout(()=>viewConsent('+conId+'),100)">📄 Pełna zgoda</button><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+  document.getElementById("modC").innerHTML=h;
+  document.getElementById("modal").classList.add("on");
 }
 
 // Po podziękowaniu — powrót do panelu kosmetologa (NIE location.reload).
 // Powód: kosmetolog dalej musi uzupełnić zdjęcia przed/po, parametry zabiegu, notatki.
 // Reload zniszczyłby kontekst (cur, savedCid, savedConId) i wymagałby wpisywania wszystkiego od nowa.
 function kioskReturnToCosmo(){
-  if(window._kioskCountdownIv){clearInterval(window._kioskCountdownIv);window._kioskCountdownIv=null;}
-  // Wyjście z trybu kiosku (PIN nie wymagany — zgoda już zapisana, kontekst bezpieczny)
-  document.body.classList.remove("kiosk-mode");
-  if(typeof _kioskBlockKeys==="function")window.removeEventListener("keydown",_kioskBlockKeys,true);
-  // Odbuduj widok zgody do stanu po podpisie i pokaż panel kosmetologa.
-  // Wywołujemy renderForm żeby przebudować formularz, potem natychmiast pokazujemy
-  // ekran podsumowania z lStamp + przejście do panelu kosmetologa.
-  if(cur){
-    // Przebudowa: pokaż handover (z lStamp) + showStep2 (panel kosmetologa)
-    // Najprościej: znajdź checkbox i pokaż handover + cosmoP, ukryj resztę
-    const handover=document.getElementById("handover");
-    const cosmoP=document.getElementById("cosmoP");
-    if(handover)handover.style.display="block";
-    if(cosmoP){cosmoP.style.display="block";cosmoP.scrollIntoView({behavior:"smooth"});}
-    // Komunikat dla kosmetologa
-    setTimeout(()=>toast("📋 Uzupełnij zdjęcia przed/po, parametry i notatki",4000),300);
-  }else{
-    // Fallback: jeśli kontekst zgubiony, przejdź do widoku klientów
-    showV("clients");
-  }
+  // Zachowanie pozostawione dla zgodności wstecznej — używane w niektórych ścieżkach.
+  // Główna logika przeniesiona do _kioskUnlockForCosmo + _showCosmoActionMenu (FIX 4).
+  _kioskUnlockForCosmo(true);
 }
 
 function sendRecsSMS(){
@@ -2210,13 +2391,54 @@ function gatherData(){
 }
 
 async function autoPDF(label){
-  try{document.querySelectorAll(".no-print").forEach(e=>e.style.display="none");
-  const c=await html2canvas(document.getElementById("vConsent"),{scale:1.5,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:840});
-  const{jsPDF}=window.jspdf;const pw=210,iw=pw-20,ih=(c.height*iw)/c.width;
-  const pdf=new jsPDF("p","mm","a4");let rem=ih,sy=0;
-  while(rem>0){if(sy>0)pdf.addPage();const pH=Math.min(rem,277),sH=(pH/ih)*c.height;const sl=document.createElement("canvas");sl.width=c.width;sl.height=sH;sl.getContext("2d").drawImage(c,0,sy,c.width,sH,0,0,c.width,sH);pdf.addImage(sl.toDataURL("image/jpeg",.88),"JPEG",10,10,iw,pH);sy+=sH;rem-=pH;}
-  pdf.save("Zgoda_"+((document.getElementById("fN")?.value||"klient").replace(/[^a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g,"").replace(/\s+/g,"_"))+"_"+label+"_"+new Date().toISOString().split("T")[0]+".pdf");
-  }catch(e){console.error(e);}
+  // FIX 1: Paginacja PDF — eliminacja ucinania tekstu.
+  // Problemy w starym algorytmie:
+  //  1) "windowWidth:840" sztywne — na szerokim ekranie elementy renderowały się
+  //     w mniejszej skali i ostatni rząd kończył się przyciętą linią
+  //  2) brak overlapu między stronami — pH=277mm trafiał akurat w środek linii tekstu
+  //  3) jpeg z compression .88 zaokrąglał subpiksele
+  // Nowy algorytm:
+  //  - scale 2 (lepsza ostrość przy zachowaniu rozsądnego rozmiaru pliku)
+  //  - windowWidth bierzemy z faktycznej szerokości elementu (większy = lepiej)
+  //  - PAGE_OVERLAP_MM=8mm — następna strona zaczyna się 8mm wcześniej, dzięki czemu
+  //    linia obcięta na granicy strony jest powtórzona w całości na następnej
+  //  - margin top/bottom 12mm zamiast 10mm dla większej estetyki
+  //  - PNG zamiast JPEG dla zgód (są tekstem, kompresja PNG nie ucina detali)
+  try{
+    document.querySelectorAll(".no-print").forEach(e=>e.style.display="none");
+    const target=document.getElementById("vConsent");
+    const realWidth=Math.max(target.scrollWidth,840);
+    const c=await html2canvas(target,{scale:2,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:realWidth,scrollY:-window.scrollY});
+    const{jsPDF}=window.jspdf;
+    const PW=210,PH=297,MARGIN=12,IW=PW-2*MARGIN;     // A4 portret w mm
+    const ih=(c.height*IW)/c.width;                    // wysokość pełnego obrazu w mm
+    const PAGE_USABLE=PH-2*MARGIN;                     // 273mm
+    const PAGE_OVERLAP_MM=8;                            // overlap między stronami
+    const pdf=new jsPDF("p","mm","a4");
+    let mmConsumed=0,sy=0;
+    while(mmConsumed<ih){
+      if(mmConsumed>0)pdf.addPage();
+      // Ile milimetrów jeszcze zostało
+      const rem=ih-mmConsumed;
+      const pH=Math.min(rem,PAGE_USABLE);
+      // Wycinek canvas odpowiadający pH milimetrom
+      const sH=(pH/ih)*c.height;
+      const sl=document.createElement("canvas");
+      sl.width=c.width;sl.height=sH;
+      sl.getContext("2d").drawImage(c,0,sy,c.width,sH,0,0,c.width,sH);
+      pdf.addImage(sl.toDataURL("image/jpeg",.92),"JPEG",MARGIN,MARGIN,IW,pH);
+      // Numerowanie stron — pomocne przy dłuższych zgodach
+      const pageNum=pdf.internal.getNumberOfPages();
+      pdf.setFontSize(8);pdf.setTextColor(120);
+      pdf.text("Strona "+pageNum,PW-MARGIN,PH-4,{align:"right"});
+      pdf.setTextColor(0);
+      // Następna strona zaczyna się PAGE_OVERLAP_MM wcześniej (dla ciągłości)
+      const consumed=pH-(rem>PAGE_USABLE?PAGE_OVERLAP_MM:0);
+      mmConsumed+=consumed;
+      sy+=(consumed/ih)*c.height;
+    }
+    pdf.save("Zgoda_"+((document.getElementById("fN")?.value||"klient").replace(/[^a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g,"").replace(/\s+/g,"_"))+"_"+label+"_"+new Date().toISOString().split("T")[0]+".pdf");
+  }catch(e){console.error("autoPDF:",e);toast("⚠ Błąd generowania PDF: "+e.message);}
   document.querySelectorAll(".no-print").forEach(e=>e.style.display="");
 }
 
@@ -3437,19 +3659,33 @@ async function downloadConsentPDF(conId){
   if(!el){toast("Błąd: brak zawartości");return;}
   toast("Generuję PDF...");
   try{
-    // Ukryj przyciski na czas renderu
     el.querySelectorAll(".brow").forEach(b=>b.style.display="none");
-    const c=await html2canvas(el,{scale:1.5,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:700});
+    const realWidth=Math.max(el.scrollWidth,840);
+    const c=await html2canvas(el,{scale:2,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:realWidth,scrollY:-window.scrollY});
     el.querySelectorAll(".brow").forEach(b=>b.style.display="");
-    const{jsPDF}=window.jspdf;const pw=210,iw=pw-20,ih=(c.height*iw)/c.width;
-    const pdf=new jsPDF("p","mm","a4");let rem=ih,sy=0;
-    while(rem>0){
-      if(sy>0)pdf.addPage();
-      const pH=Math.min(rem,277),sH=(pH/ih)*c.height;
-      const sl=document.createElement("canvas");sl.width=c.width;sl.height=sH;
+    const{jsPDF}=window.jspdf;
+    const PW=210,PH=297,MARGIN=12,IW=PW-2*MARGIN;
+    const ih=(c.height*IW)/c.width;
+    const PAGE_USABLE=PH-2*MARGIN;
+    const PAGE_OVERLAP_MM=8;
+    const pdf=new jsPDF("p","mm","a4");
+    let mmConsumed=0,sy=0;
+    while(mmConsumed<ih){
+      if(mmConsumed>0)pdf.addPage();
+      const rem=ih-mmConsumed;
+      const pH=Math.min(rem,PAGE_USABLE);
+      const sH=(pH/ih)*c.height;
+      const sl=document.createElement("canvas");
+      sl.width=c.width;sl.height=sH;
       sl.getContext("2d").drawImage(c,0,sy,c.width,sH,0,0,c.width,sH);
-      pdf.addImage(sl.toDataURL("image/jpeg",.88),"JPEG",10,10,iw,pH);
-      sy+=sH;rem-=pH;
+      pdf.addImage(sl.toDataURL("image/jpeg",.92),"JPEG",MARGIN,MARGIN,IW,pH);
+      const pageNum=pdf.internal.getNumberOfPages();
+      pdf.setFontSize(8);pdf.setTextColor(120);
+      pdf.text("Strona "+pageNum,PW-MARGIN,PH-4,{align:"right"});
+      pdf.setTextColor(0);
+      const consumed=pH-(rem>PAGE_USABLE?PAGE_OVERLAP_MM:0);
+      mmConsumed+=consumed;
+      sy+=(consumed/ih)*c.height;
     }
     const cons=await dbGetAll("consents");const co=cons.find(x=>x.id===conId);
     const cls=await dbGetAll("clients");const cl=cls.find(x=>x.id===co?.clientId);
@@ -3879,15 +4115,119 @@ async function exportStockCSV(){
 async function showStockImportModal(){
   let h='<h3>📥 Wczytaj cennik do magazynu</h3>';
   h+='<div class="db" style="background:var(--wb);border-left-color:var(--wn);font:400 10px var(--fb)">Wybierz źródło. Istniejące produkty o tej samej nazwie + marce zostaną zaktualizowane (ceny + pojemność), stan magazynowy nie jest zmieniany.</div>';
-  h+='<div class="fl"><label>Szybki import wbudowanych katalogów</label>';
-  h+='<div class="brow"><button class="b b1 bsm" onclick="importEstGenCatalog()">🌸 Katalog estGen (37 produktów)</button>';
-  h+='<button class="b b1 bsm" onclick="importAllegroProducts()">📦 Zakupy Allegro (ok. 200 poz.)</button></div>';
+  h+='<div class="fl"><label>Szybki import wbudowanych katalogów (wszystko na raz)</label>';
+  h+='<div class="brow"><button class="b b1 bsm" onclick="importEstGenCatalog()">🌸 estGen — wszystkie 37</button>';
+  h+='<button class="b b1 bsm" onclick="importAllegroProducts()">📦 Allegro — wszystkie ok. 200</button></div>';
+  h+='</div>';
+  // FIX 5: Selektywny import — kosmetolog wybiera tylko te produkty których faktycznie używa.
+  h+='<div class="fl" style="margin-top:10px"><label>Wybierz pojedyncze produkty z katalogu (zaznacz tylko te których używasz)</label>';
+  h+='<div class="brow"><button class="b bs bsm" onclick="showCatalogPicker(\'estgen\')">✓ Wybierz z estGen</button>';
+  h+='<button class="b bs bsm" onclick="showCatalogPicker(\'allegro\')">✓ Wybierz z Allegro</button></div>';
   h+='</div>';
   h+='<div class="fl" style="margin-top:10px"><label>Albo wczytaj własny plik CSV/XLSX (kolumny: Nazwa, Marka, Kategoria, Cena zakupu, Cena sprzedaży, Pojemność, Stan)</label>';
   h+='<input type="file" id="stockFile" accept=".csv,.xlsx,.xls" onchange="importStockFromFile(this)"></div>';
   h+='<div class="brow" style="margin-top:10px"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
   document.getElementById("modC").innerHTML=h;
   document.getElementById("modal").classList.add("on");
+}
+
+// FIX 5: Selektywny picker produktów z katalogu — pełnoekranowy modal z listą,
+// checkboxami, wyszukiwarką i podziałem na kategorie. Importuje tylko zaznaczone.
+let _catalogPickerSel=new Set();
+function showCatalogPicker(source){
+  _catalogPickerSel=new Set();
+  const catalog=source==="estgen"?ESTGEN_CATALOG:ALLEGRO_PRODUCTS;
+  const sourceName=source==="estgen"?"estGen":"Allegro";
+  // Sprawdź które produkty już są w bazie żeby je dyskretnie oznaczyć
+  dbGetAll("products").then(existing=>{
+    const existingKeys=new Set(existing.map(p=>((p.name||"")+"|"+(p.brand||"")).toLowerCase()));
+    const mc=document.getElementById("modC");
+    mc.style.maxWidth="95vw";mc.style.width="95vw";mc.style.maxHeight="95vh";
+    let h='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">';
+    h+='<h3 style="margin:0">📋 Wybierz produkty z katalogu '+sourceName+' ('+catalog.length+')</h3>';
+    h+='<div class="brow" style="margin:0"><button class="b b2 bsm" onclick="closeMo()">✕ Zamknij</button></div>';
+    h+='</div>';
+    h+='<div class="db" style="background:var(--wb);border-left-color:var(--wn);font:400 10px var(--fb);margin-bottom:8px">Zaznacz tylko te produkty których używasz w gabinecie. Już istniejące w Twojej bazie są oznaczone "✓ w bazie".</div>';
+    h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">';
+    h+='<input type="text" id="catSearch" placeholder="🔍 Filtruj po nazwie lub kategorii..." oninput="_filterCatalogPicker()" style="flex:1;min-width:200px;padding:8px;border:1px solid var(--bd);border-radius:var(--rs)">';
+    h+='<button class="b b2 bsm" onclick="_catalogPickerToggleAll(true)">Zaznacz wszystkie widoczne</button>';
+    h+='<button class="b b2 bsm" onclick="_catalogPickerToggleAll(false)">Odznacz wszystkie</button>';
+    h+='</div>';
+    h+='<div id="catPickerList" style="max-height:60vh;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--rs);padding:6px;background:var(--bg2)" data-source="'+source+'">';
+    let lastCat="";
+    catalog.forEach((row,idx)=>{
+      const [name,brand,cat,purchase,retail,size,notes]=row;
+      const key=(name+"|"+brand).toLowerCase();
+      const inBase=existingKeys.has(key);
+      if(cat!==lastCat){h+='<div style="font:600 10px var(--fb);color:var(--t);background:var(--c);padding:6px 8px;margin:6px 0 2px;border-radius:var(--rs);position:sticky;top:0">'+esc(cat||"Inne")+'</div>';lastCat=cat;}
+      h+='<label class="cat-row" data-name="'+esc(name).toLowerCase()+'" data-cat="'+esc(cat||"").toLowerCase()+'" style="display:flex;gap:8px;padding:6px 8px;border-bottom:1px solid var(--bd);cursor:pointer;background:'+(inBase?"var(--sb)":"var(--c)")+'">';
+      h+='<input type="checkbox" data-idx="'+idx+'" '+(inBase?"":"")+' onchange="_catalogPickerToggle(this)" style="accent-color:var(--g);width:18px;height:18px;flex-shrink:0;margin-top:2px">';
+      h+='<div style="flex:1;min-width:0">';
+      h+='<div style="font:500 11px var(--fb);overflow:hidden;text-overflow:ellipsis">'+esc(name)+(inBase?' <span style="font:600 8px var(--fb);background:var(--sc);color:#fff;padding:1px 4px;border-radius:6px">✓ w bazie</span>':'')+'</div>';
+      h+='<div style="font:300 9px var(--fb);color:var(--t2)">'+esc(size||"")+(purchase?' · zakup '+purchase+' zł':'')+(retail?' · sprzedaż '+retail+' zł':'')+'</div>';
+      if(notes)h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:2px">'+esc(notes.substring(0,90))+(notes.length>90?'…':'')+'</div>';
+      h+='</div></label>';
+    });
+    h+='</div>';
+    h+='<div class="brow" style="margin-top:10px;justify-content:space-between;align-items:center">';
+    h+='<span id="catPickerCnt" style="font:600 11px var(--fb);color:var(--t)">0 wybranych</span>';
+    h+='<div><button class="b b2 bsm" onclick="closeMo()">Anuluj</button>';
+    h+='<button class="b bs bsm" onclick="_catalogPickerImport(\''+source+'\')">📥 Dodaj wybrane do magazynu</button></div>';
+    h+='</div>';
+    mc.innerHTML=h;
+    document.getElementById("modal").classList.add("on");
+  });
+}
+function _catalogPickerToggle(cb){
+  const idx=+cb.dataset.idx;
+  if(cb.checked)_catalogPickerSel.add(idx);else _catalogPickerSel.delete(idx);
+  const cnt=document.getElementById("catPickerCnt");
+  if(cnt)cnt.textContent=_catalogPickerSel.size+" wybranych";
+}
+function _catalogPickerToggleAll(checked){
+  // Zaznacz/odznacz tylko widoczne (po filtrze)
+  document.querySelectorAll("#catPickerList .cat-row").forEach(row=>{
+    if(row.style.display!=="none"){
+      const cb=row.querySelector("input[type=checkbox]");
+      if(cb&&cb.checked!==checked){cb.checked=checked;_catalogPickerToggle(cb);}
+    }
+  });
+}
+function _filterCatalogPicker(){
+  const q=(document.getElementById("catSearch")?.value||"").toLowerCase().trim();
+  document.querySelectorAll("#catPickerList .cat-row").forEach(row=>{
+    if(!q){row.style.display="";return;}
+    const n=row.dataset.name||"";const c=row.dataset.cat||"";
+    row.style.display=(n.includes(q)||c.includes(q))?"":"none";
+  });
+}
+async function _catalogPickerImport(source){
+  if(!_catalogPickerSel.size){toast("Nie zaznaczono żadnego produktu");return;}
+  const catalog=source==="estgen"?ESTGEN_CATALOG:ALLEGRO_PRODUCTS;
+  const existing=await dbGetAll("products");
+  const byKey={};existing.forEach(p=>{byKey[((p.name||"")+"|"+(p.brand||"")).toLowerCase()]=p;});
+  let added=0,updated=0;
+  for(const idx of _catalogPickerSel){
+    const [name,brand,cat,purchase,retail,size,notes]=catalog[idx];
+    const key=(name+"|"+brand).toLowerCase();
+    const kind=retail?"both":"usable";
+    const base={name,brand,category:cat,kind,purchase_price:purchase,retail_price:retail,size,unit:"szt",notes,updatedAt:new Date().toISOString()};
+    if(byKey[key]){
+      const ex=byKey[key];Object.assign(ex,base);
+      await dbPut("products",ex);
+      // Push do chmury — żeby po pierwszym imporcie był od razu na innych urządzeniach
+      if(typeof supaUpsert==="function")supaUpsert("products",ex);
+      updated++;
+    }else{
+      const newId=await dbAdd("products",{...base,stock:0,min_stock:1,createdAt:new Date().toISOString()});
+      const newRec={...base,id:newId,stock:0,min_stock:1};
+      if(typeof supaUpsert==="function")supaUpsert("products",newRec);
+      added++;
+    }
+  }
+  closeMo();
+  toast("✓ Dodano: "+added+", zaktualizowano: "+updated+(typeof supaUpsert==="function"?" — sync do chmury w toku":""));
+  renderStock();
 }
 
 // Wbudowany katalog estGen — 37 wariantów cenowych z PDF
