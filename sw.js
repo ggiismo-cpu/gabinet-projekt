@@ -1,6 +1,13 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.0  |  2026-04-25
+ *  Wersja: 1.2.1  |  2026-04-25
+ *  Zmiany v1.2.1 (hotfix):
+ *   • Synchronizacja DELETE produktów między urządzeniami (REPLICA IDENTITY FULL)
+ *   • Bulk-delete produktów w magazynie
+ *   • Naprawa zapisu zdjęć w PWA (usunięto capture="environment", recovery z localStorage)
+ *   • Eliminacja duplikatu przycisku "Synchronizuj" w widoku magazynu
+ *   • Wydłużenie ekranu "Dziękujemy" do 30s z powrotem do panelu kosmetologa
+ *   • Pełnoekranowy podgląd zgody z dużym podpisem i inline PDF preview
  *  Zmiany v1.2.0:
  *   • Synchronizacja magazynu (products + stock_moves) z Supabase
  *   • Realtime listener dla wielu urządzeń
@@ -18,7 +25,7 @@
 "use strict";
 
 // BUMPUJ WERSJĘ przy każdej zmianie app-shell żeby wymusić odświeżenie cache
-const CACHE_VERSION = "v1.2.0";
+const CACHE_VERSION = "v1.2.1";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------

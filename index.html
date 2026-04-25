@@ -377,8 +377,9 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
 <button class="b bs bsm" onclick="openStockForm(null)">➕ Dodaj produkt</button>
 <button class="b b1 bsm" onclick="showStockImportModal()">📥 Wczytaj cennik</button>
 <button class="b b2 bsm" onclick="exportStockCSV()">📊 Eksport CSV</button>
-<button class="b bs bsm" onclick="quickSyncStock()" title="Synchronizuj magazyn z chmurą (pobierz + wyślij)">🔄 Synchronizuj</button>
-<span id="stockSyncBadge" style="font:500 10px var(--fb);color:var(--t2);align-self:center"></span>
+<button class="b b2 bsm" onclick="toggleStockSelMode()" id="stockSelModeBtn">☑ Zaznacz wiele</button>
+<button class="b bd bsm" onclick="bulkDeleteStock()" id="stockBulkDelBtn" style="display:none">🗑 Usuń zaznaczone<span id="stockSelCnt"></span></button>
+<span id="stockSyncBadge" style="font:500 10px var(--fb);color:var(--t2);align-self:center" title="Stan synchronizacji magazynu"></span>
 </div></div>
 <!-- Podsumowanie wartości magazynu -->
 <div id="stockSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
@@ -937,8 +938,20 @@ async function supaUpsert(table,rec){
     const payload={...rec,user_id:supaUser.id};
     // Usuń id jeśli nie jest UUID (lokalny IndexedDB id jest int)
     if(typeof payload.id==="number"){payload.local_id=payload.id;delete payload.id;}
+    // _syncedAt jest tylko lokalną flagą — Supabase nie ma takiej kolumny, usuwamy z payloadu
+    delete payload._syncedAt;
     const{data,error}=await supa.from(table).upsert(payload,{onConflict:'local_id,user_id'}).select();
     if(error){console.warn("supaUpsert error:",error);return null;}
+    // Po udanym push: oznacz w IDB że rekord był zsynchronizowany (potrzebne dla DELETE-sync).
+    // Robimy to tylko dla 'products' bo tam wykrywamy DELETE w globalFullSync; dla innych
+    // tabel nie ma DELETE-syncu, więc _syncedAt byłby tylko balastem.
+    if(table==="products"&&typeof rec.id==="number"){
+      try{
+        const all=await dbGetAll("products");
+        const local=all.find(p=>p.id===rec.id);
+        if(local&&!local._syncedAt){local._syncedAt=new Date().toISOString();await dbPut("products",local);}
+      }catch(_){}
+    }
     return data&&data[0];
   }catch(e){console.warn("supaUpsert exception:",e);return null;}
 }
@@ -1387,12 +1400,17 @@ document.addEventListener("DOMContentLoaded",()=>{
   document.addEventListener("visibilitychange",()=>{
     if(document.visibilityState==="visible"&&supa&&supaUser&&isOnline){
       globalFullSync(false); // cicha sync bez spinnera
+      _photoDraftRestore();   // recovery zdjęć z draftu (po powrocie z aparatu)
     }else if(document.visibilityState==="hidden"&&supa&&supaUser&&isOnline){
       // Próba sync przy zamknięciu / ukryciu — beacon-style (best effort)
       navigator.sendBeacon?null:null; // placeholder — globalFullSync jest async
       globalFullSync(false).catch(()=>{});
     }
   });
+  // pageshow odpala się też po BFCache restore na iOS — kluczowe gdy native aparat
+  // wyrzucił PWA na chwilę i wróciliśmy z plikiem w input. Recovery działa tylko
+  // jeśli formularz zgody jest wciąż aktywny (sprawdzane wewnątrz _photoDraftRestore).
+  window.addEventListener("pageshow",()=>{_photoDraftRestore();});
   // Jeśli nie ma konfiguracji PIN i nie ma sesji Supabase → pozwól na szybki dostęp
   // (mode selector zostanie pokazany, użytkownik wybiera)
 });
@@ -1550,8 +1568,49 @@ async function openCam(type){try{const stream=await navigator.mediaDevices.getUs
 function snapCam(type){const v=document.getElementById("camV"),c=document.getElementById("camCv");c.width=v.videoWidth;c.height=v.videoHeight;c.getContext("2d").drawImage(v,0,0);photos[type]=c.toDataURL("image/jpeg",.85);stopCam();closeMo();drawPhoto(type);updCmp();}
 function stopCam(){const v=document.getElementById("camV");if(v&&v.srcObject){v.srcObject.getTracks().forEach(t=>t.stop());}}
 function fallbackFile(type){const inp=document.querySelector("#pb_"+type+" input[type=file]");if(inp)inp.click();}
-function photoUp(type,inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{photos[type]=e.target.result;drawPhoto(type);updCmp();};r.readAsDataURL(f);}
-function drawPhoto(type){const b=document.getElementById("pb_"+type);if(!b)return;if(photos[type]){b.classList.add("hp");b.innerHTML='<img src="'+photos[type]+'" onclick="openLb(this.src)"><button class="pr" onclick="event.stopPropagation();rmPhoto(\''+type+'\')">×</button><div class="pl">'+(type==="before"?"PRZED":"PO")+"</div>";}else{b.classList.remove("hp");b.innerHTML='<div style="display:flex;gap:4px"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\''+type+'\')">📸</button><button class="b b2 bsm" onclick="event.stopPropagation();fallbackFile(\''+type+'\')">📁</button></div><div class="pl">'+(type==="before"?"PRZED":"PO")+'</div><input type="file" accept="image/*" capture="environment" onchange="photoUp(\''+type+'\',this)">';}}
+function photoUp(type,inp){
+  const f=inp.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    photos[type]=e.target.result;
+    drawPhoto(type);
+    updCmp();
+    // Persistuj draft natychmiast — na wypadek gdyby OS ubił PWA podczas otwierania aparatu
+    // (typowe na Androidzie przy capture="environment" lub przy słabej pamięci RAM).
+    try{
+      const draft=JSON.parse(localStorage.getItem("_photoDraft")||"{}");
+      draft[type]=e.target.result;
+      draft._ts=new Date().toISOString();
+      draft._client=cur?.id||null;
+      localStorage.setItem("_photoDraft",JSON.stringify(draft));
+    }catch(_){}
+  };
+  r.readAsDataURL(f);
+}
+// Recovery — przy starcie aplikacji oraz po `pageshow` (powrót z natywnego aparatu)
+// odczytujemy draft i wznawiamy stan zdjęć jeśli istnieje.
+function _photoDraftRestore(){
+  try{
+    const raw=localStorage.getItem("_photoDraft");if(!raw)return;
+    const draft=JSON.parse(raw);
+    // Drafty starsze niż 6h są martwe (klient już wyszedł z gabinetu)
+    if(draft._ts){
+      const age=Date.now()-new Date(draft._ts).getTime();
+      if(age>6*3600*1000){localStorage.removeItem("_photoDraft");return;}
+    }
+    // Tylko jeśli formularz zgody jest na ekranie i klient się zgadza
+    const vc=document.getElementById("vConsent");
+    if(!vc||!vc.classList.contains("active"))return;
+    if(draft._client&&cur&&draft._client!==cur.id)return; // inny klient
+    let restored=0;
+    ["before","after"].forEach(t=>{
+      if(draft[t]&&!photos[t]){photos[t]=draft[t];drawPhoto(t);restored++;}
+    });
+    if(restored)toast("📸 Przywrócono "+restored+" zdjęć z poprzedniej sesji");
+  }catch(_){}
+}
+function _photoDraftClear(){try{localStorage.removeItem("_photoDraft");}catch(_){}}
+function drawPhoto(type){const b=document.getElementById("pb_"+type);if(!b)return;if(photos[type]){b.classList.add("hp");b.innerHTML='<img src="'+photos[type]+'" onclick="openLb(this.src)"><button class="pr" onclick="event.stopPropagation();rmPhoto(\''+type+'\')">×</button><div class="pl">'+(type==="before"?"PRZED":"PO")+"</div>";}else{b.classList.remove("hp");b.innerHTML='<div style="display:flex;gap:4px;flex-direction:column;align-items:center"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\''+type+'\')" title="Aparat w aplikacji (zalecane)">📸 Aparat</button><button class="b b2 bsm" style="font-size:9px;padding:4px 8px" onclick="event.stopPropagation();fallbackFile(\''+type+'\')" title="Wybierz z galerii lub natywny aparat (jeśli aparat w aplikacji nie działa)">📁 Galeria</button></div><div class="pl">'+(type==="before"?"PRZED":"PO")+'</div><input type="file" accept="image/*" onchange="photoUp(\''+type+'\',this)">';}}
 function rmPhoto(type){photos[type]=null;drawPhoto(type);updCmp();}
 function updCmp(){const c=document.getElementById("pcmp");if(!c)return;if(photos.before&&photos.after){c.classList.add("vis");c.innerHTML='<div class="pcmpg"><img src="'+photos.before+'" onclick="openLb(this.src)"><img src="'+photos.after+'" onclick="openLb(this.src)"></div><div class="pcmpl"><span>PRZED</span><span>PO</span></div>';}else{c.classList.remove("vis");c.innerHTML="";}}
 function openLb(src){document.getElementById("lbI").src=src;document.getElementById("lb").classList.add("on");}
@@ -1725,8 +1784,8 @@ function renderForm(){
   h+='<div id="upsellList" style="min-height:40px;border:1px dashed var(--bd);border-radius:var(--rs);padding:8px;font:300 10px var(--fb);color:var(--t2);background:var(--bg2)">Brak. Kliknij "➕ Dobierz produkty" aby polecić klientowi kosmetyki do pielęgnacji domowej.</div>';
   h+='<div id="upsellTotal" style="display:none;font:600 12px var(--fb);margin-top:4px;text-align:right;color:var(--sc)"></div>';
   h+='<div style="margin-top:10px;font:500 10px var(--fb);color:var(--t2);text-transform:uppercase;margin-bottom:4px">Zdjęcia</div>';
-  h+='<div class="pg"><div class="pb" id="pb_before"><div style="display:flex;gap:4px"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'before\')">📸</button><button class="b b2 bsm" onclick="event.stopPropagation();fallbackFile(\'before\')">📁</button></div><div class="pl">PRZED</div><input type="file" accept="image/*" capture="environment" onchange="photoUp(\'before\',this)"></div>';
-  h+='<div class="pb" id="pb_after"><div style="display:flex;gap:4px"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'after\')">📸</button><button class="b b2 bsm" onclick="event.stopPropagation();fallbackFile(\'after\')">📁</button></div><div class="pl">PO</div><input type="file" accept="image/*" capture="environment" onchange="photoUp(\'after\',this)"></div></div>';
+  h+='<div class="pg"><div class="pb" id="pb_before"><div style="display:flex;gap:4px;flex-direction:column;align-items:center"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'before\')" title="Aparat w aplikacji (zalecane)">📸 Aparat</button><button class="b b2 bsm" style="font-size:9px;padding:4px 8px" onclick="event.stopPropagation();fallbackFile(\'before\')" title="Wybierz z galerii">📁 Galeria</button></div><div class="pl">PRZED</div><input type="file" accept="image/*" onchange="photoUp(\'before\',this)"></div>';
+  h+='<div class="pb" id="pb_after"><div style="display:flex;gap:4px;flex-direction:column;align-items:center"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'after\')" title="Aparat w aplikacji (zalecane)">📸 Aparat</button><button class="b b2 bsm" style="font-size:9px;padding:4px 8px" onclick="event.stopPropagation();fallbackFile(\'after\')" title="Wybierz z galerii">📁 Galeria</button></div><div class="pl">PO</div><input type="file" accept="image/*" onchange="photoUp(\'after\',this)"></div></div>';
   h+='<div class="pcmp" id="pcmp"></div>';
   h+='<div class="brow"><button class="b bs" onclick="cosmoSave()">💾 Zapisz dane zabiegowe</button></div></div>';
   // STEP 3
@@ -1768,6 +1827,7 @@ async function clientSave(){
   d.legalStamp={ts:new Date().toISOString(),ua:navigator.userAgent.substring(0,100),scr:screen.width+"x"+screen.height,hash:await sha256(d.name+d.phone+cur.id+Date.now())};
   const ids=await saveToDB(d);savedCid=ids.cid;savedConId=ids.conId;
   clearDraft(cur.id);stopDraftTimer();  // draft już niepotrzebny — dane w IDB
+  _photoDraftClear();                    // draft zdjęć też — bo trafiły do consents
   document.getElementById("lStamp").style.display="block";
   document.getElementById("lStamp").innerHTML='<strong>✅ Zgoda zapisana</strong> | '+d.legalStamp.ts.replace("T"," ").substring(0,19)+' | '+esc(cur.name)+' | '+esc(d.name)+' | <code style="font-size:7px">'+d.legalStamp.hash.substring(0,16)+'</code>';
   document.getElementById("btnSv").disabled=true;document.getElementById("btnSv").textContent="✅ Zapisano";
@@ -1815,24 +1875,47 @@ function kioskShowThankYou(){
     '<p style="font:400 16px var(--fb);color:var(--t2);line-height:1.6;margin-bottom:24px">'+
       'Formularz zgody został pomyślnie zapisany.<br>Proszę oddać tablet obsłudze.'+
     '</p>'+
-    '<div id="kioskCountdown" style="font:300 12px var(--fb);color:var(--t2)">Ekran odświeży się za <span id="kCntNum">10</span> s.</div>'+
+    '<div id="kioskCountdown" style="font:300 12px var(--fb);color:var(--t2);margin-bottom:16px">Tablet wróci do panelu kosmetologa za <span id="kCntNum">30</span> s.</div>'+
+    '<button class="b b2 bsm" onclick="kioskReturnToCosmo()" style="font:500 11px var(--fb)">↩ Wróć teraz do panelu kosmetologa</button>'+
     '</div>';
   window.scrollTo({top:0,behavior:"smooth"});
-  // Odliczanie
-  let s=10;
+  // Wydłużony odlicznik (30s) — daje klientce czas na oddanie tabletu kosmetolog,
+  // a kosmetolog ma chwilę zanim potrzebuje zdjąć tryb kiosku ręcznie.
+  let s=30;
   const iv=setInterval(()=>{
     s--;
     const n=document.getElementById("kCntNum");
     if(n)n.textContent=s;
-    if(s<=0){
-      clearInterval(iv);
-      // Wyjście z trybu kiosku bez PINu (kontekst bezpieczny — zgoda zapisana)
-      document.body.classList.remove("kiosk-mode");
-      window.removeEventListener("keydown",_kioskBlockKeys,true);
-      // Przeładuj żeby wyczyścić stan formularza dla kolejnego klienta
-      location.reload();
-    }
+    if(s<=0){clearInterval(iv);kioskReturnToCosmo();}
   },1000);
+  // Zachowaj ID timera żeby przycisk "Wróć teraz" mógł go zatrzymać
+  window._kioskCountdownIv=iv;
+}
+
+// Po podziękowaniu — powrót do panelu kosmetologa (NIE location.reload).
+// Powód: kosmetolog dalej musi uzupełnić zdjęcia przed/po, parametry zabiegu, notatki.
+// Reload zniszczyłby kontekst (cur, savedCid, savedConId) i wymagałby wpisywania wszystkiego od nowa.
+function kioskReturnToCosmo(){
+  if(window._kioskCountdownIv){clearInterval(window._kioskCountdownIv);window._kioskCountdownIv=null;}
+  // Wyjście z trybu kiosku (PIN nie wymagany — zgoda już zapisana, kontekst bezpieczny)
+  document.body.classList.remove("kiosk-mode");
+  if(typeof _kioskBlockKeys==="function")window.removeEventListener("keydown",_kioskBlockKeys,true);
+  // Odbuduj widok zgody do stanu po podpisie i pokaż panel kosmetologa.
+  // Wywołujemy renderForm żeby przebudować formularz, potem natychmiast pokazujemy
+  // ekran podsumowania z lStamp + przejście do panelu kosmetologa.
+  if(cur){
+    // Przebudowa: pokaż handover (z lStamp) + showStep2 (panel kosmetologa)
+    // Najprościej: znajdź checkbox i pokaż handover + cosmoP, ukryj resztę
+    const handover=document.getElementById("handover");
+    const cosmoP=document.getElementById("cosmoP");
+    if(handover)handover.style.display="block";
+    if(cosmoP){cosmoP.style.display="block";cosmoP.scrollIntoView({behavior:"smooth"});}
+    // Komunikat dla kosmetologa
+    setTimeout(()=>toast("📋 Uzupełnij zdjęcia przed/po, parametry i notatki",4000),300);
+  }else{
+    // Fallback: jeśli kontekst zgubiony, przejdź do widoku klientów
+    showV("clients");
+  }
 }
 
 function sendRecsSMS(){
@@ -3027,7 +3110,7 @@ async function showDet(cid){
   renderClientGallery(cid);
   setTimeout(()=>{const p=document.getElementById("smsP");if(p)p.addEventListener("input",updSms);updSms();},50);
 }
-async function addPhotoToCon(conId){const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.capture="environment";inp.onchange=async()=>{const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=async e=>{const cons=await dbGetAll("consents");const con=cons.find(c=>c.id===conId);if(con){con.photoAfter=e.target.result;await dbPut("consents",con);toast("Zdjęcie dodane ✓");showDet(con.clientId);}};r.readAsDataURL(f);};inp.click();}
+async function addPhotoToCon(conId){const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=async()=>{const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=async e=>{const cons=await dbGetAll("consents");const con=cons.find(c=>c.id===conId);if(con){con.photoAfter=e.target.result;await dbPut("consents",con);toast("Zdjęcie dodane ✓");showDet(con.clientId);}};r.readAsDataURL(f);};inp.click();}
 function updSms(){const p=document.getElementById("smsP");if(!p)return;const txt=p.textContent||"";const enc=encodeURIComponent(txt);const sl=document.getElementById("smsL"),wl=document.getElementById("waL");if(sl)sl.href=sl.href.split("?")[0]+"?body="+enc;if(wl)wl.href=wl.href.split("?")[0]+"?text="+enc;const cnt=document.getElementById("smsCnt");if(cnt){const l=txt.length;cnt.textContent=l+" zn."+(l>160?" ("+Math.ceil(l/153)+" SMS)":"");}}
 function copySms(){navigator.clipboard.writeText(document.getElementById("smsP")?.textContent||"").then(()=>toast("✓"));}
 function sendMail(em){window.open("mailto:"+em+"?subject="+encodeURIComponent("Przypomnienie — Gabinet Magda Mączyńska")+"&body="+encodeURIComponent(document.getElementById("smsP")?.textContent||""));}
@@ -3058,7 +3141,16 @@ async function viewConsent(conId){
   const cons=await dbGetAll("consents");const co=cons.find(x=>x.id===conId);
   if(!co){toast("Nie znaleziono zgody");return;}
   const cls=await dbGetAll("clients");const cl=cls.find(x=>x.id===co.clientId);
-  let h='<h3>📄 Zgoda — '+esc(co.treatmentName||"(bez nazwy)")+'</h3>';
+  // Pełnoekranowy widok — modal rozszerzony do 95vw / 95vh dla czytelności pełnej zgody.
+  // CSS-override na konkretnej instancji modC zapewnia że nie wpływa to na inne modale.
+  const mc=document.getElementById("modC");
+  mc.style.maxWidth="95vw";mc.style.width="95vw";mc.style.maxHeight="95vh";
+  let h='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">';
+  h+='<h3 style="margin:0">📄 Zgoda — '+esc(co.treatmentName||"(bez nazwy)")+'</h3>';
+  h+='<div class="brow" style="margin:0"><button class="b bs bsm" onclick="downloadConsentPDF('+conId+')">📄 Pobierz PDF</button>';
+  h+='<button class="b b1 bsm" onclick="previewConsentPDFInline('+conId+')" title="Podgląd pełnej treści w okienku">🔍 Pełny PDF inline</button>';
+  h+='<button class="b b2 bsm" onclick="closeMo()">✕ Zamknij</button></div>';
+  h+='</div>';
   h+='<div class="db" style="background:var(--bg2)"><strong>Klient:</strong> '+esc(cl?.name||"?")+(cl?.phone?' · '+esc(cl.phone):"")+'<br>';
   h+='<strong>Data podpisu:</strong> '+esc(co.date||co.createdAt?.substring(0,10)||"?")+'<br>';
   if(co.legalStamp?.ts)h+='<strong>Godzina:</strong> '+esc(co.legalStamp.ts.replace("T"," ").substring(0,19))+'<br>';
@@ -3112,21 +3204,64 @@ async function viewConsent(conId){
   // Parametry zabiegu + notatki kosmetologa
   if(co.params){h+='<div class="ct" style="font-size:10px;margin-top:8px">Parametry zabiegu</div><div style="background:var(--bg2);padding:6px 8px;border-radius:var(--rs);font:400 11px var(--fb);white-space:pre-wrap">'+esc(co.params)+'</div>';}
   if(co.notes){h+='<div class="ct" style="font-size:10px;margin-top:8px">Notatki</div><div style="background:var(--bg2);padding:6px 8px;border-radius:var(--rs);font:400 11px var(--fb);white-space:pre-wrap">'+esc(co.notes)+'</div>';}
-  // Zdjęcia przed/po
+  // Zdjęcia przed/po — większe, klikalne do lightbox
   if(co.photoBefore||co.photoAfter){
-    h+='<div class="ct" style="font-size:10px;margin-top:8px">Zdjęcia</div><div class="hp2">';
-    if(co.photoBefore)h+='<img src="'+co.photoBefore+'" onclick="openLb(this.src)" style="cursor:pointer">';
-    if(co.photoAfter)h+='<img src="'+co.photoAfter+'" onclick="openLb(this.src)" style="cursor:pointer">';
+    h+='<div class="ct" style="font-size:10px;margin-top:8px">Zdjęcia</div><div style="display:flex;gap:8px;flex-wrap:wrap">';
+    if(co.photoBefore)h+='<div style="flex:1;min-width:240px"><div style="font:600 10px var(--fb);color:var(--t2);margin-bottom:4px">PRZED</div><img src="'+co.photoBefore+'" onclick="openLb(this.src)" style="cursor:pointer;width:100%;max-height:400px;object-fit:contain;background:#000;border-radius:var(--rs)"></div>';
+    if(co.photoAfter)h+='<div style="flex:1;min-width:240px"><div style="font:600 10px var(--fb);color:var(--t2);margin-bottom:4px">PO</div><img src="'+co.photoAfter+'" onclick="openLb(this.src)" style="cursor:pointer;width:100%;max-height:400px;object-fit:contain;background:#000;border-radius:var(--rs)"></div>';
     h+='</div>';
   }
-  // Podpis
+  // Podpis — duży, kontrastowy, łatwo zweryfikować autentyczność
   if(co.sig1){
-    h+='<div class="ct" style="font-size:10px;margin-top:8px">Podpis klienta</div>';
-    h+='<div style="background:#fff;padding:10px;border:1px solid var(--bd);border-radius:var(--rs);text-align:center"><img src="'+co.sig1+'" style="max-width:100%;max-height:150px"></div>';
+    h+='<div class="ct" style="font-size:11px;margin-top:12px;color:var(--sc)">✍ Podpis klienta</div>';
+    h+='<div style="background:#fff;padding:16px;border:2px solid var(--sc);border-radius:var(--rs);text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.08)">';
+    h+='<img src="'+co.sig1+'" onclick="openLb(this.src)" style="max-width:100%;max-height:240px;cursor:pointer" title="Kliknij aby powiększyć">';
+    h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">Kliknij aby powiększyć — weryfikacja podpisu</div>';
+    h+='</div>';
   }
-  h+='<div class="brow" style="margin-top:10px"><button class="b bs" onclick="downloadConsentPDF('+conId+')">📄 Pobierz PDF</button><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
-  document.getElementById("modC").innerHTML=h;
+  h+='<div class="brow" style="margin-top:14px;justify-content:center"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+  mc.innerHTML=h;
   document.getElementById("modal").classList.add("on");
+}
+
+// Inline preview PDF — dla osób które chcą zobaczyć dokładnie tę treść którą klient
+// zobaczy w PDFie, bez konieczności pobierania pliku. Generujemy PDF blob i wstawiamy
+// w iframe wewnątrz modalu. Działa offline.
+async function previewConsentPDFInline(conId){
+  const cons=await dbGetAll("consents");const co=cons.find(x=>x.id===conId);
+  if(!co){toast("Nie znaleziono zgody");return;}
+  const cls=await dbGetAll("clients");const cl=cls.find(x=>x.id===co.clientId);
+  // Pokażemy spinner
+  const mc=document.getElementById("modC");
+  mc.innerHTML='<h3>📄 Generowanie podglądu PDF...</h3><div style="text-align:center;padding:40px"><div style="font-size:32px">⏳</div><div style="font:400 12px var(--fb);color:var(--t2);margin-top:8px">Render może potrwać do 5 sekund dla zgód ze zdjęciami</div></div>';
+  document.getElementById("modal").classList.add("on");
+  // Renderuje viewConsent w ukrytym kontenerze, robi html2canvas → jsPDF → Blob URL → iframe.
+  // To samo co downloadConsentPDF, tylko zamiast `pdf.save()` robimy `pdf.output('bloburl')`.
+  try{
+    // Tymczasowo wyrenderuj viewConsent w ukrytym divie żeby html2canvas miał z czego rysować
+    const tmp=document.createElement("div");
+    tmp.style.cssText="position:fixed;left:-99999px;top:0;width:840px;background:#FAFAF7;padding:20px";
+    tmp.id="_pdfPreviewTmp";
+    document.body.appendChild(tmp);
+    // Skopiuj zawartość viewConsent (bez przycisków)
+    await viewConsent(conId);
+    const realMc=document.getElementById("modC");
+    tmp.innerHTML=realMc.innerHTML;
+    tmp.querySelectorAll(".brow").forEach(e=>e.remove()); // usuń przyciski z preview
+    const c=await html2canvas(tmp,{scale:1.5,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:840});
+    document.body.removeChild(tmp);
+    const{jsPDF}=window.jspdf;const pw=210,iw=pw-20,ih=(c.height*iw)/c.width;
+    const pdf=new jsPDF("p","mm","a4");let rem=ih,sy=0;
+    while(rem>0){if(sy>0)pdf.addPage();const pH=Math.min(rem,277),sH=(pH/ih)*c.height;const sl=document.createElement("canvas");sl.width=c.width;sl.height=sH;sl.getContext("2d").drawImage(c,0,sy,c.width,sH,0,0,c.width,sH);pdf.addImage(sl.toDataURL("image/jpeg",.88),"JPEG",10,10,iw,pH);sy+=sH;rem-=pH;}
+    const blobUrl=pdf.output("bloburl");
+    const mc2=document.getElementById("modC");
+    mc2.style.maxWidth="95vw";mc2.style.width="95vw";mc2.style.maxHeight="95vh";
+    mc2.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📄 Pełen podgląd PDF — '+esc(co.treatmentName||"")+'</h3><div class="brow" style="margin:0"><button class="b bs bsm" onclick="downloadConsentPDF('+conId+')">📥 Pobierz</button><button class="b b2 bsm" onclick="viewConsent('+conId+')">↩ Wróć</button><button class="b b2 bsm" onclick="closeMo()">✕</button></div></div>'+
+      '<iframe src="'+blobUrl+'" style="width:100%;height:80vh;border:1px solid var(--bd);border-radius:var(--rs);background:#525659"></iframe>';
+  }catch(e){
+    console.error("previewConsentPDFInline:",e);
+    document.getElementById("modC").innerHTML='<h3>❌ Błąd generowania podglądu</h3><div class="db" style="border-left-color:var(--dn)">'+esc(e.message||"nieznany")+'</div><div class="brow"><button class="b b2" onclick="viewConsent('+conId+')">↩ Wróć do zgody</button><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+  }
 }
 
 // Generuje PDF-a z treści zgody (taki jak viewConsent wyżej). Używa jsPDF + html2canvas.
@@ -3268,7 +3403,7 @@ function openGalleryUpload(cid){
   let h='<h3>📸 Dodaj zdjęcia do galerii</h3>';
   h+='<div class="db">Zdjęcia przechowywane są lokalnie w tym urządzeniu. Kompresowane do max 1200px szerokości / JPEG 0.8 żeby nie zapychać pamięci.</div>';
   h+='<div class="fl"><label>Wybierz zdjęcia (wielokrotny wybór możliwy)</label>';
-  h+='<input type="file" id="galFiles" accept="image/*" multiple capture="environment" style="font:400 11px var(--fb)">';
+  h+='<input type="file" id="galFiles" accept="image/*" multiple style="font:400 11px var(--fb)">';
   h+='</div>';
   h+='<div class="fl"><label>Notatka (opcjonalnie — dotyczy wszystkich dodawanych zdjęć)</label>';
   h+='<input type="text" id="galNote" maxlength="100" placeholder="np. Przed serią BioRePeel / Reakcja 3h po zabiegu">';
@@ -3364,6 +3499,13 @@ async function renderStock(){
     b.classList.toggle("b1",b.dataset.stockTab===_stockTab);
     b.classList.toggle("b2",b.dataset.stockTab!==_stockTab);
   });
+  // Stan przycisku trybu zaznaczania — zmienia kolor gdy aktywny
+  const selBtn=document.getElementById("stockSelModeBtn");
+  if(selBtn){selBtn.classList.toggle("b1",_stockSelMode);selBtn.classList.toggle("b2",!_stockSelMode);selBtn.textContent=_stockSelMode?"✕ Zakończ":"☑ Zaznacz wiele";}
+  const bulkBtn=document.getElementById("stockBulkDelBtn");
+  if(bulkBtn)bulkBtn.style.display=(_stockSelMode&&_stockSel.size)?"inline-flex":"none";
+  const cnt=document.getElementById("stockSelCnt");
+  if(cnt)cnt.textContent=_stockSel.size?(" ("+_stockSel.size+")"):"";
   const all=await dbGetAll("products");
   const q=((document.getElementById("stockSrch")||{}).value||"").toLowerCase().trim();
   // Podsumowanie — niezależnie od zakładki
@@ -3396,6 +3538,17 @@ async function renderStock(){
   // Grupuj po kategorii
   const groups={};list.forEach(p=>{const g=p.category||"(bez kategorii)";if(!groups[g])groups[g]=[];groups[g].push(p);});
   let h="";
+  if(_stockSelMode){
+    const allIds=list.map(p=>p.id);
+    const allSelected=allIds.length>0&&allIds.every(id=>_stockSel.has(id));
+    h+='<div style="margin-top:6px;padding:8px;background:var(--sb);border-radius:var(--rs);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">';
+    h+='<span style="font:600 11px var(--fb);color:var(--sc)">☑ Tryb zaznaczania — '+_stockSel.size+' z '+list.length+' produktów</span>';
+    h+='<div class="brow" style="margin:0">';
+    h+='<button class="b b2 bsm" onclick="(function(){'+(allSelected?'_stockSel.clear()':'list_select_all()')+';renderStock();})()">'+(allSelected?'☐ Odznacz wszystkie':'☑ Zaznacz wszystkie ('+list.length+')')+'</button>';
+    h+='</div></div>';
+    // Pomocnik wystawiony do globalnego scope dla onclick
+    window.list_select_all=()=>{allIds.forEach(id=>_stockSel.add(id));};
+  }
   for(const gName of Object.keys(groups)){
     h+='<div style="margin-top:10px"><div class="ct" style="font-size:11px">'+esc(gName)+' <span style="color:var(--t2);font-weight:300">('+groups[gName].length+')</span></div>';
     h+='<div style="border:1px solid var(--bd);border-radius:var(--rs);background:var(--c)">';
@@ -3405,7 +3558,10 @@ async function renderStock(){
       const pPrice=p.purchase_price!=null?(+p.purchase_price).toFixed(2)+" zł":"—";
       const rPrice=p.retail_price!=null?(+p.retail_price).toFixed(2)+" zł":"—";
       const margin=(p.purchase_price&&p.retail_price)?((p.retail_price-p.purchase_price)/p.retail_price*100).toFixed(0)+"%":"—";
-      h+='<div style="padding:8px;border-bottom:1px solid var(--bd);display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">';
+      h+='<div style="padding:8px;border-bottom:1px solid var(--bd);display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap'+(_stockSelMode&&_stockSel.has(p.id)?";background:var(--sb)":"")+'">';
+      if(_stockSelMode){
+        h+='<label style="display:flex;align-items:center;padding:8px 4px;cursor:pointer"><input type="checkbox" '+(_stockSel.has(p.id)?"checked":"")+' onchange="toggleStockSel('+p.id+',this.checked)" style="width:20px;height:20px;accent-color:var(--g)"></label>';
+      }
       h+='<div style="flex:1;min-width:180px">';
       h+='<div style="font:600 12px var(--fb)">'+esc(p.name||"(bez nazwy)")+(p.brand?' <span style="color:var(--t2);font-weight:300">·'+esc(p.brand)+'</span>':"")+'</div>';
       h+='<div style="font:300 10px var(--fb);color:var(--t2)">'+esc(p.size||"")+(p.notes?" · "+esc(p.notes.substring(0,60)):"")+'</div>';
@@ -3478,8 +3634,51 @@ async function saveStockItem(productId){
 async function deleteStockItem(productId){
   if(!confirm("Usunąć produkt z bazy? Historia ruchów magazynowych pozostanie."))return;
   await dbDel("products",productId);
+  // Sync DELETE do chmury — bez tego inne urządzenia nadal widzą produkt
+  // i przy globalFullSync mogą przywrócić go z powrotem (UPSERT race).
+  // supaDelete jest fire-and-forget; gdy offline, lokalne usunięcie jest zachowane,
+  // a delta-sync (globalFullSync.PULL) później rozprawi się z konfliktami.
+  if(typeof supaDelete==="function")supaDelete("products",productId);
   markDirty();toast("Usunięto ✓");renderStock();
 }
+
+// Bulk delete — usuwa wszystkie zaznaczone produkty z magazynu i propaguje
+// usunięcie do chmury. Używa promise pool po 8 równoległych usunięć,
+// żeby nie zalewać Supabase przy dużych selekcjach.
+async function bulkDeleteStock(){
+  const ids=Array.from(_stockSel||[]);
+  if(!ids.length){toast("Nie zaznaczono produktów");return;}
+  if(!confirm("Usunąć "+ids.length+" zaznaczonych produktów? Historia ruchów magazynowych pozostanie."))return;
+  let done=0;
+  for(let i=0;i<ids.length;i+=8){
+    const batch=ids.slice(i,i+8);
+    await Promise.all(batch.map(async id=>{
+      try{
+        await dbDel("products",id);
+        if(typeof supaDelete==="function")supaDelete("products",id);
+        done++;
+      }catch(e){console.warn("bulk delete:",id,e);}
+    }));
+  }
+  _stockSel.clear();
+  markDirty();toast("Usunięto "+done+" produktów ✓");renderStock();
+}
+function toggleStockSel(id,checked){
+  if(!_stockSel)_stockSel=new Set();
+  if(checked)_stockSel.add(id);else _stockSel.delete(id);
+  // Zaktualizuj licznik bez pełnego rerenderu
+  const cnt=document.getElementById("stockSelCnt");
+  if(cnt)cnt.textContent=_stockSel.size?(" ("+_stockSel.size+" zaznaczonych)"):"";
+  const btn=document.getElementById("stockBulkDelBtn");
+  if(btn)btn.style.display=_stockSel.size?"inline-flex":"none";
+}
+function toggleStockSelMode(){
+  _stockSelMode=!_stockSelMode;
+  if(!_stockSelMode){_stockSel?.clear();}
+  renderStock();
+}
+let _stockSel=new Set();
+let _stockSelMode=false;
 
 // Szybka korekta stanu o ±1 z rejestracją ruchu
 async function adjustStock(productId,delta){
@@ -4077,7 +4276,15 @@ async function deleteUnknownPhone(cid){
   showUnknownPhones();
 }
 
-function closeMo(){document.getElementById("modal").classList.remove("on");try{document.removeEventListener("click",bkOutsideClick,true);}catch(_){}try{document.removeEventListener("click",serOutsideClick,true);}catch(_){}}
+function closeMo(){
+  document.getElementById("modal").classList.remove("on");
+  // Reset inline-style na modC — viewConsent/previewConsentPDFInline ustawiają fullscreen,
+  // bez resetu kolejne mniejsze modale wyglądałyby źle.
+  const mc=document.getElementById("modC");
+  if(mc){mc.style.maxWidth="";mc.style.width="";mc.style.maxHeight="";}
+  try{document.removeEventListener("click",bkOutsideClick,true);}catch(_){}
+  try{document.removeEventListener("click",serOutsideClick,true);}catch(_){}
+}
 function esc(s){if(!s)return"";const d=document.createElement("div");d.textContent=s;return d.innerHTML;}
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("on");setTimeout(()=>t.classList.remove("on"),3000);}
 function dl(c,n,t){const b=new Blob(["\ufeff"+c],{type:t});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=n;a.click();URL.revokeObjectURL(u);}
@@ -5376,8 +5583,10 @@ async function globalFullSync(showProgress=true){
     for(const r of(coCloud||[])){if(r.local_id&&!localCoIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("consents",rec).catch(()=>{});pulled++;}}
     for(const r of(apCloud||[])){if(r.local_id&&!localApIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("appointments",rec).catch(()=>{});pulled++;}}
     // Produkty: dodaj nowe LUB zaktualizuj jeśli cloud.updatedAt > local.updatedAt
+    const cloudPrIds=new Set();
     for(const r of(prCloud||[])){
       if(!r.local_id)continue;
+      cloudPrIds.add(r.local_id);
       const local=localPrMap[r.local_id];
       const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;
       if(!local){
@@ -5388,6 +5597,17 @@ async function globalFullSync(showProgress=true){
         await dbPut("products",local).catch(()=>{});pulled++;
       }
     }
+    // KASOWANIE LOKALNE: produkty które kiedyś były synchronizowane z chmurą,
+    // ale teraz w niej nie istnieją = ktoś usunął je na innym urządzeniu.
+    // Bezpieczne kryterium: lokalny rekord ma `_syncedAt` (czyli był wcześniej
+    // wysyłany do Supabase) — to wyklucza świeże offline-only rekordy.
+    let removed=0;
+    for(const local of localProds){
+      if(local._syncedAt&&!cloudPrIds.has(local.id)){
+        await dbDel("products",local.id).catch(()=>{});removed++;
+      }
+    }
+    if(removed)console.log("globalFullSync: usunięto",removed,"produktów które zostały usunięte na innym urządzeniu");
     for(const r of(mvCloud||[])){if(r.local_id&&!localMvIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("stockMoves",rec).catch(()=>{});pulled++;}}
     _lastSyncTs=Date.now();
     localStorage.setItem("mm_lastSync",_lastSyncTs);
