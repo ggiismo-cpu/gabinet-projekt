@@ -319,6 +319,26 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
   <div class="filt-row"><label>Tylko z telefonem:</label>
     <input type="checkbox" id="filtWithPhone" style="accent-color:var(--g);width:18px;height:18px" onchange="filterCl()">
   </div>
+  <div class="filt-row"><label>🎂 Urodziny:</label>
+    <select id="filtBday" onchange="filterCl()">
+      <option value="">— dowolne —</option>
+      <option value="today">dziś</option>
+      <option value="thisMonth">w tym miesiącu</option>
+      <option value="next30">w najbliższych 30 dniach</option>
+      <option value="1">styczeń</option>
+      <option value="2">luty</option>
+      <option value="3">marzec</option>
+      <option value="4">kwiecień</option>
+      <option value="5">maj</option>
+      <option value="6">czerwiec</option>
+      <option value="7">lipiec</option>
+      <option value="8">sierpień</option>
+      <option value="9">wrzesień</option>
+      <option value="10">październik</option>
+      <option value="11">listopad</option>
+      <option value="12">grudzień</option>
+    </select>
+  </div>
 </div>
 
 <div id="cList"></div></div>
@@ -357,6 +377,8 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
 <button class="b bs bsm" onclick="openStockForm(null)">➕ Dodaj produkt</button>
 <button class="b b1 bsm" onclick="showStockImportModal()">📥 Wczytaj cennik</button>
 <button class="b b2 bsm" onclick="exportStockCSV()">📊 Eksport CSV</button>
+<button class="b bs bsm" onclick="quickSyncStock()" title="Synchronizuj magazyn z chmurą (pobierz + wyślij)">🔄 Synchronizuj</button>
+<span id="stockSyncBadge" style="font:500 10px var(--fb);color:var(--t2);align-self:center"></span>
 </div></div>
 <!-- Podsumowanie wartości magazynu -->
 <div id="stockSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
@@ -699,6 +721,7 @@ function enterAppFromSession(){
       if(typeof updModeInfo==="function")updModeInfo();
       if(typeof autoSyncPull==="function")autoSyncPull();
       if(typeof globalFullSync==="function")globalFullSync(false);
+      if(typeof rtStockSubscribe==="function")rtStockSubscribe();
     });
   }
 }
@@ -742,7 +765,7 @@ async function supaSignIn(){
     localStorage.setItem("mm_mode","online");
     document.getElementById("loginScr").style.display="none";
     document.getElementById("appWrap").style.display="block";
-    waitForDB(()=>{checkReminders();updateSyncBadge();updModeInfo();autoSyncPull();globalFullSync(false);});
+    waitForDB(()=>{checkReminders();updateSyncBadge();updModeInfo();autoSyncPull();globalFullSync(false);rtStockSubscribe();});
     toast("Zalogowano ✓");
   }catch(e){
     console.error("[Auth] Błąd logowania (szczegóły):",e);
@@ -797,7 +820,7 @@ async function supaSignUp(){
     document.getElementById("modal").classList.add("on");
   }
 }
-async function supaSignOut(){if(supa){await supa.auth.signOut();supaUser=null;isOnline=false;appMode="offline";localStorage.setItem("mm_mode","offline");updateSyncBadge();updModeInfo();toast("Wylogowano");}}
+async function supaSignOut(){if(supa){await supa.auth.signOut();if(typeof rtStockUnsubscribe==="function")rtStockUnsubscribe();supaUser=null;isOnline=false;appMode="offline";localStorage.setItem("mm_mode","offline");updateSyncBadge();updModeInfo();toast("Wylogowano");}}
 
 // ===== PASSWORD RECOVERY =====
 // Flow:
@@ -924,6 +947,101 @@ async function supaDelete(table,localId){
   try{await supa.from(table).delete().eq('local_id',localId).eq('user_id',supaUser.id);}catch(e){console.warn(e);}
 }
 
+// ===== REALTIME — magazyn (v1.2.0) =====
+// Słucha zmian na tabelach products i stock_moves; wprowadza je do IndexedDB
+// i odświeża widok magazynu jeśli jest aktywny. Subskrypcja startuje przy logowaniu
+// i przeżywa zmiany widoków (jeden kanał na sesję). Realtime musi być włączone
+// po stronie Supabase (publikacja supabase_realtime — zrobione w SQL patch v1.2.0).
+let _rtStockChannel=null;
+let _rtStockRetryTimer=null;
+let _rtStockRerenderTimer=null;
+function _rtScheduleStockRerender(){
+  clearTimeout(_rtStockRerenderTimer);
+  _rtStockRerenderTimer=setTimeout(()=>{
+    const v=document.getElementById("vStock");
+    if(v&&v.classList.contains("active")){renderStock();}
+    const badge=document.getElementById("stockSyncBadge");
+    if(badge){badge.textContent="✓ "+new Date().toLocaleTimeString("pl",{hour:"2-digit",minute:"2-digit"});badge.style.color="var(--sc)";}
+  },300);
+}
+async function rtStockSubscribe(){
+  if(!supa||!supaUser)return;
+  if(_rtStockChannel)return; // już zasubskrybowany
+  try{
+    _rtStockChannel=supa.channel("stock-rt-v1")
+      .on("postgres_changes",{event:"*",schema:"public",table:"products",filter:"user_id=eq."+supaUser.id},async(p)=>{
+        try{
+          if(p.eventType==="DELETE"){if(p.old?.local_id!=null)await dbDel("products",Number(p.old.local_id));}
+          else if(p.new){const o={...p.new,id:p.new.local_id};delete o.user_id;delete o.local_id;await dbPut("products",o);}
+          _rtScheduleStockRerender();
+        }catch(e){console.warn("rt products:",e);}
+      })
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:"stock_moves",filter:"user_id=eq."+supaUser.id},async(p)=>{
+        try{
+          if(p.new){const o={...p.new,id:p.new.local_id};delete o.user_id;delete o.local_id;await dbPut("stockMoves",o);}
+          _rtScheduleStockRerender();
+        }catch(e){console.warn("rt moves:",e);}
+      })
+      .subscribe((st,err)=>{
+        if(st==="CHANNEL_ERROR"||st==="TIMED_OUT"){
+          console.warn("Realtime magazyn:",st,err);
+          // Retry za 30s — przejściowe błędy sieci/RLS
+          clearTimeout(_rtStockRetryTimer);
+          _rtStockRetryTimer=setTimeout(()=>{rtStockUnsubscribe();rtStockSubscribe();},30000);
+        }
+      });
+  }catch(e){console.warn("rtStockSubscribe:",e);}
+}
+function rtStockUnsubscribe(){
+  if(_rtStockChannel){try{supa.removeChannel(_rtStockChannel);}catch(_){}_rtStockChannel=null;}
+  clearTimeout(_rtStockRetryTimer);
+}
+
+// Szybki sync magazynu — przycisk 🔄 w widoku magazynu.
+// Wzorowany na quickSyncCalendar: pull z chmury (delta) + push lokalnych (idempotent upsert).
+async function quickSyncStock(){
+  const badge=document.getElementById("stockSyncBadge");
+  if(!supa||!supaUser){toast("❌ Nie zalogowany w chmurze");if(badge){badge.textContent="📴 offline";badge.style.color="var(--dn)";}return;}
+  if(badge){badge.textContent="⏳ sync...";badge.style.color="var(--t2)";}
+  try{
+    // Pull
+    const{data:rProds,error:e1}=await supa.from("products").select("*").eq('user_id',supaUser.id);
+    const{data:rMoves,error:e2}=await supa.from("stock_moves").select("*").eq('user_id',supaUser.id);
+    if(e1)throw new Error("products: "+e1.message);
+    if(e2)throw new Error("stock_moves: "+e2.message);
+    const lp=await dbGetAll("products");const lpMap=new Map(lp.map(p=>[p.id,p]));
+    const lm=await dbGetAll("stockMoves");const lmIds=new Set(lm.map(m=>m.id));
+    let pulled=0,pushed=0;
+    // Pull products: nowsze updatedAt z chmury wygrywa
+    for(const r of(rProds||[])){
+      const local=lpMap.get(r.local_id);
+      const cloudTs=r.updatedAt||r.createdAt||"";
+      const localTs=local?.updatedAt||local?.createdAt||"";
+      if(!local||cloudTs>localTs){
+        const o={...r,id:r.local_id};delete o.user_id;delete o.local_id;await dbPut("products",o);pulled++;
+      }
+    }
+    // Pull moves: append-only, dodaj brakujące
+    for(const r of(rMoves||[])){
+      if(!lmIds.has(r.local_id)){const o={...r,id:r.local_id};delete o.user_id;delete o.local_id;await dbAdd("stockMoves",o).catch(()=>{});pulled++;}
+    }
+    // Push: wszystko lokalne (upsert idempotentny po unique local_id,user_id)
+    for(const p of lp){const r=await supaUpsert("products",p);if(r)pushed++;}
+    for(const m of lm){const r=await supaUpsert("stock_moves",m);if(r)pushed++;}
+    if(badge){badge.textContent="✓ "+new Date().toLocaleTimeString("pl",{hour:"2-digit",minute:"2-digit"});badge.style.color="var(--sc)";}
+    toast("Magazyn zsynchronizowany ✓ (pobrano: "+pulled+", wysłano: "+pushed+")");
+    if(document.getElementById("vStock")?.classList.contains("active"))renderStock();
+    // Po pierwszym udanym sync upewnij się że Realtime działa
+    rtStockSubscribe();
+  }catch(e){
+    console.error("quickSyncStock:",e);
+    if(badge){badge.textContent="⚠ "+e.message.substring(0,30);badge.style.color="var(--dn)";}
+    if(/missing|relation|does not exist|not found|404/i.test(e.message)){
+      toast("⚠ Tabele magazynu nie istnieją w Supabase. Uruchom SQL patch v1.2.0.");
+    }else{toast("❌ Sync magazynu nie powiódł się: "+e.message);}
+  }
+}
+
 // ===== MIGRATION (push local → cloud) =====
 async function syncAllToCloud(){
   if(!supa||!supaUser){toast("Zaloguj się do Supabase (tryb Online)");return;}
@@ -951,17 +1069,35 @@ async function syncAllFromCloud(){
     const{data:cls}=await supa.from("clients").select("*").eq('user_id',supaUser.id);
     const{data:cons}=await supa.from("consents").select("*").eq('user_id',supaUser.id);
     const{data:appts}=await supa.from("appointments").select("*").eq('user_id',supaUser.id);
+    // Magazyn (od v1.2.0) — może nie istnieć jeśli SQL patch nie został wykonany.
+    // .catch zwraca {data:null} zamiast wyrzucać błąd, żeby nie blokować pobierania reszty.
+    p.textContent="Pobieranie magazynu...";
+    const prodRes=await supa.from("products").select("*").eq('user_id',supaUser.id).then(r=>r,()=>({data:null,error:"missing"}));
+    const moveRes=await supa.from("stock_moves").select("*").eq('user_id',supaUser.id).then(r=>r,()=>({data:null,error:"missing"}));
     // Wyczyść lokalne i załaduj z chmury
     await clearStore("clients");await clearStore("consents");await clearStore("appointments");
     for(const c of(cls||[])){const r={...c,id:c.local_id};delete r.user_id;delete r.local_id;await dbAdd("clients",r);}
     for(const c of(cons||[])){const r={...c,id:c.local_id};delete r.user_id;delete r.local_id;await dbAdd("consents",r);}
     for(const a of(appts||[])){const r={...a,id:a.local_id};delete r.user_id;delete r.local_id;await dbAdd("appointments",r);}
-    p.className="mig-status ok";p.textContent="✓ Pobrano: "+((cls||[]).length)+" klientów, "+((cons||[]).length)+" zgód, "+((appts||[]).length)+" wizyt";
+    let prodCnt=0,moveCnt=0;
+    if(prodRes.data){
+      await clearStore("products");
+      for(const r of prodRes.data){const o={...r,id:r.local_id};delete o.user_id;delete o.local_id;await dbAdd("products",o);prodCnt++;}
+    }
+    if(moveRes.data){
+      await clearStore("stockMoves");
+      for(const r of moveRes.data){const o={...r,id:r.local_id};delete o.user_id;delete o.local_id;await dbAdd("stockMoves",o);moveCnt++;}
+    }
+    p.className="mig-status ok";
+    let msg="✓ Pobrano: "+((cls||[]).length)+" klientów, "+((cons||[]).length)+" zgód, "+((appts||[]).length)+" wizyt";
+    if(prodRes.data||moveRes.data){msg+=", "+prodCnt+" produktów, "+moveCnt+" ruchów magazynu";}
+    else{msg+=" (magazyn pominięty — uruchom SQL patch v1.2.0)";}
+    p.textContent=msg;
     toast("Dane pobrane z chmury ✓");
   }catch(e){p.className="mig-status err";p.textContent="❌ Błąd: "+e.message;}
 }
 async function autoSyncPull(){
-  // cicha synchronizacja przy logowaniu
+  // cicha synchronizacja przy logowaniu — DELTA MERGE (nie nadpisuje lokalnych zmian)
   if(!supa||!supaUser)return;
   try{
     const{data:cls}=await supa.from("clients").select("*").eq('user_id',supaUser.id);
@@ -969,6 +1105,23 @@ async function autoSyncPull(){
     for(const c of(cls||[])){
       if(!localIds.has(c.local_id)){const r={...c,id:c.local_id};delete r.user_id;delete r.local_id;await dbAdd("clients",r);}
     }
+    // Magazyn — pull tylko brakujących produktów i ruchów (idempotentne, bezpieczne).
+    // Stan istniejących produktów może się rozjechać z chmurą — to celowe; pełny resync
+    // wymaga ręcznego "Pobierz z chmury" w panelu Ustawienia (nadpisuje lokalne).
+    try{
+      const{data:prods}=await supa.from("products").select("*").eq('user_id',supaUser.id);
+      if(prods){
+        const lp=await dbGetAll("products");const lpIds=new Set(lp.map(p=>p.id));
+        for(const r of prods){if(!lpIds.has(r.local_id)){const o={...r,id:r.local_id};delete o.user_id;delete o.local_id;await dbAdd("products",o);}}
+      }
+      const{data:moves}=await supa.from("stock_moves").select("*").eq('user_id',supaUser.id);
+      if(moves){
+        const lm=await dbGetAll("stockMoves");const lmIds=new Set(lm.map(m=>m.id));
+        for(const r of moves){if(!lmIds.has(r.local_id)){const o={...r,id:r.local_id};delete o.user_id;delete o.local_id;await dbAdd("stockMoves",o);}}
+      }
+    }catch(e){console.warn("autoSyncPull magazyn:",e);}
+    // Po cichym pullu odśwież widoki które mogą być wyświetlane
+    if(document.getElementById("vStock")?.classList.contains("active"))renderStock();
   }catch(e){console.warn("autoSyncPull:",e);}
 }
 
@@ -1304,11 +1457,89 @@ function updBackBtn(){
   btn.style.display=_viewStack.length?"inline-flex":"none";
 }
 
+// ===== DATE-OF-BIRTH PICKER (rok/miesiąc/dzień) =====
+// Tablet-friendly alternatywa dla <input type="date"> — natywny picker na Androidzie wymaga
+// przewijania latami, co jest niewygodne dla klientów seniorów. Nasz komponent:
+//   • zwraca wartość w formacie YYYY-MM-DD (kompatybilne z istniejącym kodem)
+//   • waliduje liczbę dni w miesiącu (luty 31 = niemożliwe)
+//   • zakres lat: od 1925 do bieżącego roku (max wiek ~100, blokujemy daty z przyszłości)
+//   • rok i miesiąc jako select (szybki wybór), dzień jako select przefiltrowany po miesiącu
+const DOB_MONTHS=["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"];
+function dobPickerHTML(idPrefix,initialValue){
+  // initialValue: "YYYY-MM-DD" lub puste
+  const cur=new Date().getFullYear();
+  const minY=1925;
+  let iY="",iM="",iD="";
+  if(initialValue&&/^\d{4}-\d{2}-\d{2}$/.test(initialValue)){
+    iY=initialValue.substring(0,4);iM=String(+initialValue.substring(5,7));iD=String(+initialValue.substring(8,10));
+  }
+  let yOpts='<option value="">— rok —</option>';
+  for(let y=cur;y>=minY;y--)yOpts+='<option value="'+y+'"'+(iY==String(y)?" selected":"")+'>'+y+'</option>';
+  let mOpts='<option value="">— miesiąc —</option>';
+  for(let m=1;m<=12;m++)mOpts+='<option value="'+m+'"'+(iM==String(m)?" selected":"")+'>'+m+'. '+DOB_MONTHS[m-1]+'</option>';
+  let dOpts='<option value="">— dzień —</option>';
+  // Domyślnie 31 dni; po zmianie roku/miesiąca _dobRebuildDays uzupełni właściwą liczbę
+  const maxD=iY&&iM?_dobDaysInMonth(+iY,+iM):31;
+  for(let d=1;d<=maxD;d++)dOpts+='<option value="'+d+'"'+(iD==String(d)?" selected":"")+'>'+d+'</option>';
+  // Hidden input — wartość kompatybilna z dotychczasowym kodem (id=idPrefix)
+  return '<div class="dob-picker" data-dob-prefix="'+esc(idPrefix)+'" style="display:flex;gap:4px;flex-wrap:wrap">'+
+    '<select id="'+esc(idPrefix)+'__y" onchange="_dobSync(\''+esc(idPrefix)+'\')" style="flex:1;min-width:80px">'+yOpts+'</select>'+
+    '<select id="'+esc(idPrefix)+'__m" onchange="_dobSync(\''+esc(idPrefix)+'\')" style="flex:1.4;min-width:110px">'+mOpts+'</select>'+
+    '<select id="'+esc(idPrefix)+'__d" onchange="_dobSync(\''+esc(idPrefix)+'\')" style="flex:.7;min-width:64px">'+dOpts+'</select>'+
+    '<input type="hidden" id="'+esc(idPrefix)+'" value="'+esc(initialValue||"")+'">'+
+    '</div>';
+}
+function _dobDaysInMonth(y,m){return new Date(y,m,0).getDate();}
+function _dobRebuildDays(prefix){
+  const ySel=document.getElementById(prefix+"__y");
+  const mSel=document.getElementById(prefix+"__m");
+  const dSel=document.getElementById(prefix+"__d");
+  if(!ySel||!mSel||!dSel)return;
+  const y=+ySel.value,m=+mSel.value;
+  const oldDay=+dSel.value;
+  const max=(y&&m)?_dobDaysInMonth(y,m):31;
+  let opts='<option value="">— dzień —</option>';
+  for(let d=1;d<=max;d++){const sel=(d===oldDay&&oldDay<=max)?" selected":"";opts+='<option value="'+d+'"'+sel+'>'+d+'</option>';}
+  dSel.innerHTML=opts;
+}
+function _dobSync(prefix){
+  // Po zmianie roku/miesiąca przebuduj listę dni; potem skleja YYYY-MM-DD do hidden inputa.
+  _dobRebuildDays(prefix);
+  const ySel=document.getElementById(prefix+"__y");
+  const mSel=document.getElementById(prefix+"__m");
+  const dSel=document.getElementById(prefix+"__d");
+  const hidden=document.getElementById(prefix);
+  if(!hidden)return;
+  const y=ySel?.value,m=mSel?.value,d=dSel?.value;
+  if(y&&m&&d){
+    hidden.value=y+"-"+(+m<10?"0":"")+m+"-"+(+d<10?"0":"")+d;
+  }else{hidden.value="";}
+  // Auto-fill PESEL → DOB nie chcemy w drugą stronę nadpisać; ale gdy
+  // PESEL jest pusty a DOB ustawiony — zachowaj się neutralnie (PESEL = osobne pole).
+  // W modalu klienta jest osobny handler autoFromPESEL który uzupełnia DOB tylko gdy puste.
+  hidden.dispatchEvent(new Event("change",{bubbles:true}));
+}
+// Programmatyczne ustawienie wartości picker'a (np. po wybraniu klienta z listy lub PESEL)
+function dobPickerSetValue(prefix,val){
+  const hidden=document.getElementById(prefix);if(!hidden)return;
+  hidden.value=val||"";
+  if(!val||!/^\d{4}-\d{2}-\d{2}$/.test(val)){
+    const yS=document.getElementById(prefix+"__y");const mS=document.getElementById(prefix+"__m");const dS=document.getElementById(prefix+"__d");
+    if(yS)yS.value="";if(mS)mS.value="";if(dS)dS.value="";
+    return;
+  }
+  const yS=document.getElementById(prefix+"__y"),mS=document.getElementById(prefix+"__m"),dS=document.getElementById(prefix+"__d");
+  if(yS)yS.value=val.substring(0,4);
+  if(mS)mS.value=String(+val.substring(5,7));
+  _dobRebuildDays(prefix);
+  if(dS)dS.value=String(+val.substring(8,10));
+}
+
 // ===== SIGNATURE CLASS =====
 class Sig{constructor(c,p){this.cv=document.getElementById(c);if(!this.cv)return;this.ph=document.getElementById(p);this.ctx=this.cv.getContext("2d");this.on=false;this.has=false;this.fit();this.cv.addEventListener("pointerdown",e=>this.dn(e));this.cv.addEventListener("pointermove",e=>this.mv(e));this.cv.addEventListener("pointerup",()=>this.up());this.cv.addEventListener("pointerleave",()=>this.up());}
 fit(){const w=this.cv.parentElement.clientWidth;const d=this.has?this.cv.toDataURL():null;this.cv.width=w;this.cv.height=140;this.ctx.strokeStyle="#1E1B18";this.ctx.lineCap="round";this.ctx.lineJoin="round";if(d&&this.has){const i=new Image();i.onload=()=>this.ctx.drawImage(i,0,0);i.src=d;}}
 pos(e){const r=this.cv.getBoundingClientRect();return{x:(e.clientX-r.left)*(this.cv.width/r.width),y:(e.clientY-r.top)*(this.cv.height/r.height),p:e.pressure||.5};}
-dn(e){e.preventDefault();this.cv.setPointerCapture(e.pointerId);this.on=true;this.has=true;if(this.ph)this.ph.style.opacity="0";this.cv.parentElement.classList.add("act");const p=this.pos(e);this.ctx.beginPath();this.ctx.moveTo(p.x,p.y);}
+dn(e){if(this.cv?.dataset?.locked==="1")return;e.preventDefault();this.cv.setPointerCapture(e.pointerId);this.on=true;this.has=true;if(this.ph)this.ph.style.opacity="0";this.cv.parentElement.classList.add("act");const p=this.pos(e);this.ctx.beginPath();this.ctx.moveTo(p.x,p.y);}
 mv(e){if(!this.on)return;e.preventDefault();const p=this.pos(e);this.ctx.lineWidth=e.pointerType==="pen"?1+p.p*2.5:1.5+p.p;this.ctx.lineTo(p.x,p.y);this.ctx.stroke();this.ctx.beginPath();this.ctx.moveTo(p.x,p.y);}
 up(){this.on=false;this.cv.parentElement.classList.remove("act");}
 clear(){this.ctx.clearRect(0,0,this.cv.width,this.cv.height);this.has=false;if(this.ph)this.ph.style.opacity="1";}
@@ -1436,7 +1667,7 @@ function renderForm(){
   h+='</div>';
   // Client data
   h+='<div class="cd"><div class="ct">Dane klienta</div>';
-  h+='<div class="fr"><div class="fl"><label>Imię i Nazwisko <span class="rq">*</span></label><input type="text" id="fN" data-rq autocomplete="name"></div><div class="fl"><label>Data urodzenia</label><input type="date" id="fD"></div></div>';
+  h+='<div class="fr"><div class="fl"><label>Imię i Nazwisko <span class="rq">*</span></label><input type="text" id="fN" data-rq autocomplete="name"></div><div class="fl"><label>Data urodzenia</label>'+dobPickerHTML("fD","")+'</div></div>';
   h+='<div class="fr"><div class="fl"><label>Telefon <span class="rq">*</span></label><input type="tel" id="fP" data-rq autocomplete="tel" oninput="validatePhoneInput(this)" onblur="validatePhoneInput(this,true)"><span class="input-hint" id="fPHint">Format: 503 672 015 lub +48 503 672 015 (9 cyfr)</span></div><div class="fl"><label>E-mail</label><input type="email" id="fE" autocomplete="email"></div></div>';
   h+='<div class="fr"><div class="fl"><label>PESEL</label><input type="text" id="fPe" maxlength="11" inputmode="numeric"></div><div class="fl"><label>Adres</label><input type="text" id="fA"></div></div>';
   if(cur.extra_fields)cur.extra_fields.forEach(ef=>{h+='<div class="fr f1"><div class="fl"><label>'+esc(ef)+'</label><input type="text" class="exF" data-l="'+esc(ef)+'"></div></div>';});
@@ -1468,7 +1699,7 @@ function renderForm(){
   h+='<span style="font:300 9px var(--fb);color:var(--t2);display:block;margin-top:6px">📨 Komunikaty otrzymasz na <strong>telefon (SMS)</strong> oraz <strong>e-mail</strong> podane powyżej. Zgoda dobrowolna — bez niej nadal możesz korzystać z usług, ale nie będziemy Cię informować o promocjach. Wycofanie zgody w każdej chwili: kosmetolog.maczynska@gmail.com lub SMS "STOP" na 503 672 015. Podstawa: art. 6 ust. 1 lit. a RODO + art. 172 Prawa Telekomunikacyjnego + art. 10 UŚUDE.</span>';
   h+='</span></label>';
   h+='</div>';
-  h+='<div class="cd"><div class="ct">Wizerunek (opcja)</div><label class="cc"><input type="checkbox" id="chkWD"><span>Dokumentacja</span></label><label class="cc"><input type="checkbox" id="chkWS"><span>Szkolenia</span></label><label class="cc"><input type="checkbox" id="chkWM"><span>Marketing</span></label></div>';
+  h+='<div class="cd"><div class="ct">Wizerunek (opcja)</div><label class="cc"><input type="checkbox" id="chkWD"><span>Dokumentacja</span></label><label class="cc"><input type="checkbox" id="chkWM"><span>Marketing</span></label></div>';
   h+='<div class="cd"><div class="ct">Podpis klienta <span class="rq">*</span></div><div class="sw"><canvas id="sc1"></canvas><div class="sp" id="sp1">✍ Podpisz palcem lub penem</div></div><div class="brow"><button class="b b2 bsm" onclick="SP.c1&&SP.c1.clear()">Wyczyść</button></div></div>';
   h+='<div class="vmsg" id="vMsg"></div>';
   h+='<div class="cd no-print" id="step1Btns"><button class="b bs bbl" id="btnSv" onclick="clientSave()">✅ Potwierdzam i zapisuję zgodę</button> <button class="b b2 bsm kiosk-hide-inside" onclick="kioskEnter()" title="Ukryj nawigację i podaj tablet klientowi" style="margin-left:8px">🖥 Podaj tablet klientowi</button><div class="legal" id="lStamp" style="display:none"></div></div>';
@@ -1541,6 +1772,29 @@ async function clientSave(){
   document.getElementById("lStamp").innerHTML='<strong>✅ Zgoda zapisana</strong> | '+d.legalStamp.ts.replace("T"," ").substring(0,19)+' | '+esc(cur.name)+' | '+esc(d.name)+' | <code style="font-size:7px">'+d.legalStamp.hash.substring(0,16)+'</code>';
   document.getElementById("btnSv").disabled=true;document.getElementById("btnSv").textContent="✅ Zapisano";
   document.querySelectorAll("#fC input[data-rq],#fC select,#chkR").forEach(el=>el.disabled=true);
+  // Blokada edycji podpisu — po zapisie zgody klient/kosmetolog nie może modyfikować podpisu.
+  // Disable + visual lock: pointer-events:none, opacity 0.85, ramka zatwierdzenia, znacznik 🔒
+  const sigCv=document.getElementById("sc1");
+  if(sigCv){
+    sigCv.style.pointerEvents="none";
+    sigCv.style.opacity="0.92";
+    sigCv.dataset.locked="1";
+    const sw=sigCv.parentElement;
+    if(sw){
+      sw.style.borderColor="var(--sc)";sw.style.boxShadow="0 0 0 2px rgba(52,168,83,.25)";
+      // Usuwamy przycisk "Wyczyść" — nie ma już co czyścić
+      const clearBtn=sw.parentElement?.querySelector("button.b.b2.bsm");
+      if(clearBtn&&/wyczy/i.test(clearBtn.textContent))clearBtn.style.display="none";
+      // Dodaj badge "Zatwierdzono"
+      if(!sw.parentElement.querySelector(".sig-locked-badge")){
+        const badge=document.createElement("div");
+        badge.className="sig-locked-badge";
+        badge.style.cssText="margin-top:6px;padding:6px 10px;background:var(--sb);color:var(--sc);border-radius:var(--rs);font:600 11px var(--fb);text-align:center";
+        badge.innerHTML="🔒 Podpis zatwierdzony — zmiana niemożliwa";
+        sw.parentElement.appendChild(badge);
+      }
+    }
+  }
   document.getElementById("handover").style.display="block";
   document.getElementById("handover").scrollIntoView({behavior:"smooth"});
   toast("Zgoda zapisana ✓");
@@ -1773,7 +2027,7 @@ function gatherData(){
   const checks={};document.querySelectorAll(".ci[data-val]").forEach(ci=>{checks[ci.querySelector(".cl")?.textContent||""]=ci.dataset.val;});
   const subtypes=[];document.querySelectorAll('input[name="subtype"]:checked').forEach(cb=>subtypes.push(cb.value));
   const extras={};document.querySelectorAll(".exF").forEach(ef=>{extras[ef.dataset.l]=ef.value;});
-  return{name:g("fN"),dob:g("fD"),pesel:g("fPe"),phone:g("fP"),email:g("fE"),address:g("fA"),date:new Date().toISOString().split("T")[0],checks,subtypes,extras,rodo:document.getElementById("chkR")?.checked,marketing:document.getElementById("chkMk")?.checked,wizDok:document.getElementById("chkWD")?.checked,wizSzk:document.getElementById("chkWS")?.checked,wizMar:document.getElementById("chkWM")?.checked,sig1:SP.c1?.img(),treatmentId:cur?.id,treatmentName:cur?.name,duration:curMenu?.dur};
+  return{name:g("fN"),dob:g("fD"),pesel:g("fPe"),phone:g("fP"),email:g("fE"),address:g("fA"),date:new Date().toISOString().split("T")[0],checks,subtypes,extras,rodo:document.getElementById("chkR")?.checked,marketing:document.getElementById("chkMk")?.checked,wizDok:document.getElementById("chkWD")?.checked,wizSzk:false,wizMar:document.getElementById("chkWM")?.checked,sig1:SP.c1?.img(),treatmentId:cur?.id,treatmentName:cur?.name,duration:curMenu?.dur};
 }
 
 async function autoPDF(label){
@@ -2419,10 +2673,31 @@ async function filterCl(){
   const filtMax=filtMaxRaw?+filtMaxRaw:Infinity;
   const filtLast=(document.getElementById("filtLast")?.value)||"";
   const filtPhone=document.getElementById("filtWithPhone")?.checked;
+  const filtBday=(document.getElementById("filtBday")?.value)||"";
+
+  // Pomocnik: dla filtra urodzin sprawdza czy DOB klienta pasuje do okna
+  const today=new Date();const todayDS=today.toISOString().split("T")[0];
+  const todayMo=today.getMonth()+1,todayDay=today.getDate();
+  const next30Set=(()=>{
+    if(filtBday!=="next30")return null;
+    const set=new Set();const d=new Date(today);
+    for(let i=0;i<=30;i++){set.add((d.getMonth()+1)+"-"+d.getDate());d.setDate(d.getDate()+1);}
+    return set;
+  })();
+  const matchBday=(dob)=>{
+    if(!filtBday)return true;
+    if(!dob||!/^\d{4}-\d{2}-\d{2}$/.test(dob))return false;
+    const mo=+dob.substring(5,7),day=+dob.substring(8,10);
+    if(filtBday==="today")return mo===todayMo&&day===todayDay;
+    if(filtBday==="thisMonth")return mo===todayMo;
+    if(filtBday==="next30")return next30Set.has(mo+"-"+day);
+    const numFilt=+filtBday;
+    if(numFilt>=1&&numFilt<=12)return mo===numFilt;
+    return true;
+  };
 
   const cons=await dbGetAll("consents");
   const appts=await dbGetAll("appointments");
-  const today=new Date().toISOString().split("T")[0];
 
   // Zagreguj dane per klient: liczba zabiegów danego typu, ostatnia data, przyszłe wizyty
   const stats={};
@@ -2433,13 +2708,14 @@ async function filterCl(){
     stats[co.clientId].perTrt[n]=(stats[co.clientId].perTrt[n]||0)+1;
     if(!stats[co.clientId].lastDate||co.date>stats[co.clientId].lastDate)stats[co.clientId].lastDate=co.date||"";
   });
-  appts.forEach(a=>{if(a.date>=today){if(!stats[a.clientId])stats[a.clientId]={count:0,lastDate:"",perTrt:{}};stats[a.clientId].hasFuture=true;}});
+  appts.forEach(a=>{if(a.date>=todayDS){if(!stats[a.clientId])stats[a.clientId]={count:0,lastDate:"",perTrt:{}};stats[a.clientId].hasFuture=true;}});
 
   // Filtrowanie
   let fl=allCl.filter(c=>{
     const matchQ=!q||((c.name||"").toLowerCase().includes(q)||(c.phone||"").includes(q)||(c.email||"").toLowerCase().includes(q));
     if(!matchQ)return false;
     if(filtPhone && !c.phone)return false;
+    if(!matchBday(c.dob))return false;
     const st=stats[c.id]||{count:0,lastDate:"",perTrt:{}};
     // Filtr po zabiegu → liczba POWTÓRZEŃ tego konkretnego zabiegu
     const rep=filtTr?(st.perTrt[filtTr]||0):st.count;
@@ -2450,12 +2726,27 @@ async function filterCl(){
       else{
         const daysAgo=+filtLast;
         if(!st.lastDate)return false;
-        const diffD=(new Date(today)-new Date(st.lastDate))/(24*3600*1000);
+        const diffD=(new Date(todayDS)-new Date(st.lastDate))/(24*3600*1000);
         if(diffD<daysAgo)return false;
       }
     }
     return true;
-  }).sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
+  });
+
+  // Sortowanie: jeśli filtr urodzin aktywny — po nadchodzącym dniu urodzin (od dziś); inaczej po updatedAt desc
+  if(filtBday){
+    const dayKey=(c)=>{
+      if(!c.dob||!/^\d{4}-\d{2}-\d{2}$/.test(c.dob))return 999;
+      const mo=+c.dob.substring(5,7),day=+c.dob.substring(8,10);
+      // Liczba dni od dziś do najbliższych urodzin (0..365)
+      let bd=new Date(today.getFullYear(),mo-1,day);
+      if(bd<today){bd=new Date(today.getFullYear()+1,mo-1,day);}
+      return Math.round((bd-today)/(24*3600*1000));
+    };
+    fl.sort((a,b)=>dayKey(a)-dayKey(b));
+  }else{
+    fl.sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
+  }
 
   if(!fl.length){list.innerHTML='<div style="text-align:center;color:var(--t2);padding:20px;font:300 10px var(--fb)">'+(q||filtTr||filtLast?"Brak wyników dla ustawionych filtrów.":"Brak klientów.")+'</div>';updSelBar();return;}
 
@@ -2475,6 +2766,20 @@ async function filterCl(){
     if(filtTr){out+='<span class="tg" style="background:var(--g);color:#fff">'+filtTr.substring(0,22)+': '+rep+'×</span>';}
     else{out+='<span class="tg">'+st.count+' zab.</span>';}
     if(st.hasFuture)out+='<span class="tg" style="background:var(--sc);color:#fff">⏭ nadchodząca</span>';
+    // Tag urodzin — pokazuje się tylko gdy filtr aktywny lub gdy do urodzin <= 7 dni
+    if(c.dob&&/^\d{4}-\d{2}-\d{2}$/.test(c.dob)){
+      const mo=+c.dob.substring(5,7),day=+c.dob.substring(8,10);
+      const tdy=new Date();let bd=new Date(tdy.getFullYear(),mo-1,day);
+      if(bd<new Date(tdy.getFullYear(),tdy.getMonth(),tdy.getDate()))bd=new Date(tdy.getFullYear()+1,mo-1,day);
+      const days=Math.round((bd-tdy)/(24*3600*1000));
+      const isToday=(mo===tdy.getMonth()+1&&day===tdy.getDate());
+      if(filtBday||isToday||days<=7){
+        const lbl=isToday?"🎂 dziś!":(days===1?"🎂 jutro":"🎂 za "+days+" dni");
+        const bg=isToday?"var(--ac)":(days<=7?"var(--wb)":"var(--c2)");
+        const col=isToday?"#fff":"var(--t)";
+        out+='<span class="tg" style="background:'+bg+';color:'+col+'">'+lbl+' ('+day+'.'+(mo<10?"0":"")+mo+')</span>';
+      }
+    }
     out+='</div></div></div>';
     return out;
   }).join("");
@@ -2737,9 +3042,10 @@ async function startConsentFromProfile(treatmentId,cid){
     const sel=document.getElementById("tSel");if(!sel)return;
     sel.value=treatmentId;renderForm();
     setTimeout(()=>{
-      // Wypełnij pola klienta
+      // Wypełnij pola klienta — fD to picker (nie natywny date input), używamy dobPickerSetValue
       const set=(id,v)=>{const el=document.getElementById(id);if(el&&v)el.value=v;};
-      set("fN",c.name);set("fP",c.phone);set("fE",c.email);set("fA",c.address);set("fD",c.dob);set("fPe",c.pesel);
+      set("fN",c.name);set("fP",c.phone);set("fE",c.email);set("fA",c.address);set("fPe",c.pesel);
+      if(c.dob)dobPickerSetValue("fD",c.dob);
       toast("Dane klienta wstawione — poproś o podpis");
     },200);
   },100);
@@ -2873,9 +3179,41 @@ async function renderClientGallery(cid){
   if(!el)return;
   try{
     const all=await dbGetAll("clientPhotos");
-    const photos=all.filter(p=>p.clientId===cid).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
+    const cons=await dbGetAll("consents");
+    // Zdjęcia z osobnego store'u clientPhotos
+    const userPhotos=all.filter(p=>p.clientId===cid).map(p=>({
+      kind:"user",
+      id:p.id,
+      data:p.data,
+      note:p.note||"",
+      filename:p.filename||"",
+      createdAt:p.createdAt||""
+    }));
+    // Zdjęcia ze zgód (photoBefore / photoAfter) — dołączamy je do tej samej galerii
+    // żeby kosmetolog miał WSZYSTKIE zdjęcia klientki w jednym widoku.
+    const consPhotos=[];
+    cons.filter(co=>co.clientId===cid).forEach(co=>{
+      const baseLabel=(co.treatmentName||"Zabieg")+" · "+(co.date||(co.createdAt||"").substring(0,10));
+      if(co.photoBefore)consPhotos.push({
+        kind:"consent",
+        consentId:co.id,
+        side:"before",
+        data:co.photoBefore,
+        note:"📸 PRZED — "+baseLabel,
+        createdAt:co.cosmoTs||co.date||co.createdAt||""
+      });
+      if(co.photoAfter)consPhotos.push({
+        kind:"consent",
+        consentId:co.id,
+        side:"after",
+        data:co.photoAfter,
+        note:"📸 PO — "+baseLabel,
+        createdAt:co.cosmoTs||co.date||co.createdAt||""
+      });
+    });
+    const photos=userPhotos.concat(consPhotos).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
     if(!photos.length){
-      el.innerHTML='<div style="text-align:center;padding:10px;color:var(--t2)">Brak zdjęć. Kliknij <strong>➕ Dodaj zdjęcia</strong> aby załadować.</div>';
+      el.innerHTML='<div style="text-align:center;padding:10px;color:var(--t2)">Brak zdjęć. Kliknij <strong>➕ Dodaj zdjęcia</strong> aby załadować lub dodaj je przy zabiegu (przed/po).</div>';
       return;
     }
     // Grupuj po dacie (YYYY-MM-DD)
@@ -2887,10 +3225,19 @@ async function renderClientGallery(cid){
       h+='<div style="margin-bottom:8px"><div style="font:600 10px var(--fb);color:var(--t);margin-bottom:4px">📅 '+esc(d)+' <span style="color:var(--t2);font-weight:300">('+byDate[d].length+' zdj.)</span></div>';
       h+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
       byDate[d].forEach(p=>{
-        h+='<div style="position:relative">';
-        h+='<img src="'+p.data+'" onclick="openLb(this.src)" style="width:90px;height:90px;object-fit:cover;border-radius:var(--rs);border:1px solid var(--bd);cursor:pointer">';
-        h+='<button onclick="event.stopPropagation();deleteClientPhoto('+p.id+','+cid+')" style="position:absolute;top:2px;right:2px;background:rgba(220,60,60,.9);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font:700 10px var(--fb);cursor:pointer;line-height:1" title="Usuń">✕</button>';
-        if(p.note)h+='<div style="font:300 8px var(--fb);color:var(--t2);max-width:90px;margin-top:2px;overflow:hidden;text-overflow:ellipsis">'+esc(p.note)+'</div>';
+        const isCons=p.kind==="consent";
+        const borderColor=isCons?"var(--ac)":"var(--bd)";
+        h+='<div style="position:relative;width:90px">';
+        h+='<img src="'+p.data+'" onclick="openLb(this.src)" style="width:90px;height:90px;object-fit:cover;border-radius:var(--rs);border:2px solid '+borderColor+';cursor:pointer">';
+        if(isCons){
+          // Zdjęcia ze zgód są chronione — usuwamy je tylko razem ze zgodą
+          h+='<div style="position:absolute;top:2px;left:2px;background:var(--ac);color:#fff;border-radius:50%;width:18px;height:18px;font:700 10px var(--fb);text-align:center;line-height:18px" title="Zdjęcie z zabiegu — niezmienne">'+(p.side==="before"?"B":"A")+'</div>';
+        }else{
+          // Zdjęcia z galerii — można edytować notatkę i usuwać
+          h+='<button onclick="event.stopPropagation();editClientPhotoNote('+p.id+','+cid+')" style="position:absolute;top:2px;left:2px;background:rgba(30,30,30,.85);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font:600 10px var(--fb);cursor:pointer;line-height:1" title="Edytuj opis">✎</button>';
+          h+='<button onclick="event.stopPropagation();deleteClientPhoto('+p.id+','+cid+')" style="position:absolute;top:2px;right:2px;background:rgba(220,60,60,.9);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font:700 10px var(--fb);cursor:pointer;line-height:1" title="Usuń">✕</button>';
+        }
+        if(p.note)h+='<div style="font:300 9px var(--fb);color:var(--t);max-width:90px;margin-top:2px;line-height:1.2;overflow-wrap:break-word">'+esc(p.note)+'</div>';
         h+='</div>';
       });
       h+='</div></div>';
@@ -2900,6 +3247,20 @@ async function renderClientGallery(cid){
     console.error("Gallery render error:",e);
     el.innerHTML='<div style="color:var(--dn);padding:8px">Błąd ładowania galerii: '+esc(e.message)+'</div>';
   }
+}
+
+// Edycja opisu istniejącego zdjęcia z galerii
+async function editClientPhotoNote(photoId,cid){
+  const all=await dbGetAll("clientPhotos");
+  const p=all.find(x=>x.id===photoId);
+  if(!p){toast("Zdjęcie nie istnieje");return;}
+  const newNote=prompt("Opis zdjęcia:",p.note||"");
+  if(newNote===null)return;
+  p.note=newNote.trim();
+  p.updatedAt=new Date().toISOString();
+  await dbPut("clientPhotos",p);
+  toast("Opis zaktualizowany ✓");
+  renderClientGallery(cid);
 }
 
 // Modal uploadu zdjęć — multiple files, kompresja, opcjonalna notatka.
@@ -4733,7 +5094,7 @@ async function openClientForm(cid,returnTo){
   h+='<div class="fl"><label>Telefon <span class="rq">*</span></label><input id="clfP" type="tel" value="'+esc(c?.phone||"")+'" oninput="validatePhoneInput(this)" onblur="validatePhoneInput(this,true)" autocomplete="tel"><span class="input-hint" id="clfPHint">Format: 503 672 015 (9 cyfr, opcjonalnie +48)</span></div>';
   h+='<div class="fl"><label>E-mail</label><input id="clfE" type="email" value="'+esc(c?.email||"")+'" autocomplete="email"></div>';
   h+='<div class="fl"><label>Adres</label><input id="clfA" value="'+esc(c?.address||"")+'"></div>';
-  h+='<div class="fr"><div class="fl"><label>Data ur.</label><input id="clfD" type="date" value="'+esc(c?.dob||"")+'"></div><div class="fl"><label>PESEL</label><input id="clfPE" maxlength="11" value="'+esc(c?.pesel||"")+'" oninput="autoFromPESEL()"></div></div>';
+  h+='<div class="fr"><div class="fl"><label>Data ur.</label>'+dobPickerHTML("clfD",c?.dob||"")+'</div><div class="fl"><label>PESEL</label><input id="clfPE" maxlength="11" value="'+esc(c?.pesel||"")+'" oninput="autoFromPESEL()"></div></div>';
   h+='<div class="brow"><button class="b bs" onclick="saveClientFromModal('+(cid||'null')+')">💾 Zapisz</button>';
   h+='<button class="b b2" onclick="closeClientForm()">Anuluj</button>';
   if(isEdit)h+='<button class="b bd bsm" onclick="delCl('+cid+')" style="margin-left:auto">🗑 Usuń</button>';
@@ -4744,7 +5105,7 @@ async function openClientForm(cid,returnTo){
 
 function autoFromPESEL(){
   const p=_v("clfPE");if(p.length!==11||!validatePESEL(p))return;
-  const d=document.getElementById("clfD");if(d&&!d.value){const b=birthFromPESEL(p);if(b)d.value=b;}
+  const d=document.getElementById("clfD");if(d&&!d.value){const b=birthFromPESEL(p);if(b)dobPickerSetValue("clfD",b);}
 }
 
 async function saveClientFromModal(cid){

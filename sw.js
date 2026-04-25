@@ -1,6 +1,14 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.0  |  2026-04-21
+ *  Wersja: 1.2.0  |  2026-04-25
+ *  Zmiany v1.2.0:
+ *   • Synchronizacja magazynu (products + stock_moves) z Supabase
+ *   • Realtime listener dla wielu urządzeń
+ *   • Picker daty urodzenia rok/miesiąc/dzień
+ *   • Filtr urodzin w widoku klientów
+ *   • Blokada edycji podpisu po zapisie zgody
+ *   • Usunięcie checkboxa "Szkolenia" z formularza
+ *   • Galeria klienta zintegrowana ze zdjęciami przed/po z konsentów
  *  Strategia: cache-first (app shell + whitelistowane CDN)
  *             + stale-while-revalidate dla często używanych
  *             + network-only dla Supabase API (nigdy nie cache)
@@ -10,7 +18,7 @@
 "use strict";
 
 // BUMPUJ WERSJĘ przy każdej zmianie app-shell żeby wymusić odświeżenie cache
-const CACHE_VERSION = "v1.1.0";
+const CACHE_VERSION = "v1.2.0";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
