@@ -1,37 +1,35 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.3  |  2026-04-25
- *  Zmiany v1.2.3 (UX hotfix po teście):
- *   • PDF zgody — naprawa ucinania tekstu na końcu strony (overlap 8mm + numerowanie stron)
- *   • Pre-fill zgód marketingowych/wizerunku — nie pyta klienta dwa razy o tę samą zgodę
- *   • Tryb kiosk po podpisie: PIN-protected unlock + menu akcji kosmetologa
- *     (pełny podgląd zgody / przeciwwskazania / kalendarz / profil / nowa zgoda)
- *   • Po reload — przywróć ostatni widok (sessionStorage)
- *   • Selektywny picker produktów z katalogu estGen/Allegro
+ *  Wersja: 1.2.4  |  2026-04-25
+ *  Zmiany v1.2.4 (UX i prawne):
+ *   • Pełny podgląd zgody — viewConsent pokazuje WSZYSTKIE sekcje (przeciwwskazania,
+ *     zalecenia, zakazy, higiena, możliwe reakcje, oświadczenie klienta) z szablonu T
+ *   • PDF download/preview ekspanduje modal do pełnej wysokości — koniec ucinania
+ *   • Monit "Najpierw wybierz klienta" przed przejściem do panelu kosmetologa
+ *   • Aparat foto w galerii klienta (z opcją "zrób kolejne")
+ *   • Status zgód w profilu klienta (RODO/marketing/wizerunek) — kosmetolog widzi
+ *     na pierwszy rzut oka czy może wysyłać SMS-y promocyjne
+ *   • Mass SMS — filtruje klientów wg zgody marketingowej (art. 172 PT, art. 10 UŚUDE)
+ *  Zmiany v1.2.3:
+ *   • PDF zgody — paginacja overlap 8mm + numerowanie stron
+ *   • Pre-fill historycznych zgód marketingowych
+ *   • Tryb kiosk: PIN-protected unlock + menu akcji
+ *   • Po reload przywróć ostatni widok (sessionStorage)
+ *   • Selektywny picker produktów z katalogu
  *  Zmiany v1.2.2:
- *   • Auto-mark _syncedAt dla starych produktów
- *   • Po reload pierwotny panel
- *   • Wyszukiwarka klienta + przycisk "Nowy klient" w formularzu zgody
- *   • Zachowanie danych klienta przy zmianie zabiegu
+ *   • _syncedAt auto-mark, pierwotny panel po reload
+ *   • Wyszukiwarka klienta + przycisk "Nowy klient" w zgodzie
  *   • Soft-hide wbudowanych zabiegów
- *   • Wizyta w kalendarzu: profil klienta + lista innych wizyt + odwołanie serii
+ *   • Wizyta w kalendarzu: profil klienta + lista wizyt + odwołanie serii
  *  Zmiany v1.2.1:
- *   • REPLICA IDENTITY FULL dla Realtime DELETE
- *   • Bulk-delete produktów
- *   • Naprawa zapisu zdjęć (recovery localStorage)
- *   • Pełnoekranowy podgląd zgody
+ *   • REPLICA IDENTITY FULL, bulk-delete, recovery zdjęć, pełnoekranowy podgląd zgody
  *  Zmiany v1.2.0:
- *   • Synchronizacja magazynu z Supabase + Realtime
- *   • Picker daty urodzenia rok/miesiąc/dzień
- *   • Filtr urodzin w widoku klientów
- *   • Blokada edycji podpisu po zapisie
- *   • Galeria klienta zintegrowana ze zdjęciami przed/po
+ *   • Sync magazynu z Realtime, picker DOB, filtr urodzin, lock podpisu, galeria
  * ============================================================ */
 
 "use strict";
 
-// BUMPUJ WERSJĘ przy każdej zmianie app-shell żeby wymusić odświeżenie cache
-const CACHE_VERSION = "v1.2.3";
+const CACHE_VERSION = "v1.2.4";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------

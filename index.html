@@ -3409,6 +3409,53 @@ async function showDet(cid){
     h+='</div></div>';
   }
 
+  // FIX 5: Sekcja "Status zgód i kontakt" — kosmetolog na pierwszy rzut oka widzi czy
+  // może wysłać SMS promocyjny / email marketingowy / publikować zdjęcia. Bez tego
+  // ryzyko naruszenia art. 172 PT (kara do 3% rocznego obrotu) + RODO.
+  // Agregujemy zgody ze WSZYSTKICH historycznych zgód — wystarczy że raz wyraził.
+  const consAggr={
+    rodo:cons.some(co=>co.rodo),
+    marketing:cons.some(co=>co.marketing),
+    wizDok:cons.some(co=>co.wizDok),
+    wizMar:cons.some(co=>co.wizMar)
+  };
+  const lastWith=(field)=>{const m=cons.filter(co=>co[field]).sort((a,b)=>(b.date||"").localeCompare(a.date||""));return m[0]?.date||"";};
+  h+='<div style="margin-top:6px"><div class="ct">📋 Status zgód i kontakt</div>';
+  h+='<div style="background:var(--bg2);border-radius:var(--rs);padding:10px;font:400 11px var(--fb)">';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">';
+  // RODO
+  if(consAggr.rodo){
+    h+='<div style="background:var(--sb);border-left:3px solid var(--sc);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--sc)">✓ RODO — dane osobowe</div><div style="font:300 9px var(--fb);color:var(--t2)">Wyrażona '+esc(lastWith("rodo"))+'</div></div>';
+  }else{
+    h+='<div style="background:var(--db);border-left:3px solid var(--dn);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--dn)">✗ RODO niewyrażona</div><div style="font:300 9px var(--fb);color:var(--t2)">Wymagane przed jakimkolwiek zabiegiem</div></div>';
+  }
+  // Marketing — tu jest puenta dla SMS-a promocyjnego
+  if(consAggr.marketing){
+    h+='<div style="background:var(--sb);border-left:3px solid var(--sc);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--sc)">📱 Zgoda marketingowa ✓</div><div style="font:300 9px var(--fb);color:var(--t2)">Można wysyłać SMS/email promocyjny</div><div style="font:300 9px var(--fb);color:var(--t2)">Wyrażona '+esc(lastWith("marketing"))+'</div></div>';
+  }else{
+    h+='<div style="background:var(--wb);border-left:3px solid var(--wn);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--wn)">⚠ Brak zgody marketingowej</div><div style="font:300 9px var(--fb);color:var(--t2)">SMS/email promocyjny <strong>NIE</strong> wolno wysyłać<br>(art. 172 PT, art. 10 UŚUDE)</div></div>';
+  }
+  // Wizerunek - dokumentacja
+  if(consAggr.wizDok){
+    h+='<div style="background:var(--sb);border-left:3px solid var(--sc);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--sc)">📸 Wizerunek — dokumentacja ✓</div><div style="font:300 9px var(--fb);color:var(--t2)">Zdjęcia przed/po do dokumentacji medycznej</div></div>';
+  }else{
+    h+='<div style="background:var(--bg);border:1px solid var(--bd);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--t2)">○ Brak zgody wizerunek-dokumentacja</div><div style="font:300 9px var(--fb);color:var(--t2)">Można zaproponować przy nowej zgodzie</div></div>';
+  }
+  // Wizerunek - marketing (publikacja w social mediach)
+  if(consAggr.wizMar){
+    h+='<div style="background:var(--sb);border-left:3px solid var(--sc);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--sc)">🎯 Wizerunek — marketing ✓</div><div style="font:300 9px var(--fb);color:var(--t2)">Zdjęcia można publikować w social mediach</div></div>';
+  }else{
+    h+='<div style="background:var(--bg);border:1px solid var(--bd);padding:6px 8px;border-radius:var(--rs)"><div style="font:600 10px var(--fb);color:var(--t2)">○ Brak zgody wizerunek-marketing</div><div style="font:300 9px var(--fb);color:var(--t2)"><strong>NIE</strong> publikować zdjęć tego klienta</div></div>';
+  }
+  h+='</div>';
+  // Kontakt — tel/email
+  h+='<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd);display:flex;gap:10px;flex-wrap:wrap;font:400 10px var(--fb)">';
+  if(c.phone)h+='<span>📞 <a href="tel:'+esc(c.phone)+'" style="color:var(--g);text-decoration:none">'+esc(c.phone)+'</a></span>';
+  if(c.email)h+='<span>✉ <a href="mailto:'+esc(c.email)+'" style="color:var(--g);text-decoration:none">'+esc(c.email)+'</a></span>';
+  if(!c.phone&&!c.email)h+='<span style="color:var(--t2)">Brak danych kontaktowych</span>';
+  h+='</div>';
+  h+='</div></div>';
+
   // ===== GALERIA KLIENTA (osobna od zdjęć zabiegowych) =====
   // Pokazujemy placeholder - faktyczna zawartość ładowana asynchronicznie przez renderClientGallery.
   h+='<div style="margin-top:6px"><div class="ct">📸 Galeria klienta <button class="b b1 bsm" onclick="openGalleryUpload('+cid+')" style="float:right;margin-top:-2px">➕ Dodaj zdjęcia</button></div>';
@@ -3574,21 +3621,98 @@ async function viewConsent(conId){
     const taks=Object.entries(co.checks).filter(([,v])=>v==="TAK");
     const nies=Object.entries(co.checks).filter(([,v])=>v==="NIE");
     if(taks.length){
-      h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--dn)">⚠ Zaznaczone TAK</div>';
+      h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--dn)">⚠ Zaznaczone TAK ('+taks.length+')</div>';
       h+='<div style="background:var(--db);border-left:3px solid var(--dn);padding:8px;border-radius:var(--rs);font:400 11px var(--fb)">';
       taks.forEach(([k])=>{h+='<div style="padding:2px 0">▸ '+esc(k)+'</div>';});
       h+='</div>';
     }
     if(nies.length){
-      h+='<details style="margin-top:6px"><summary style="font:400 10px var(--fb);color:var(--t2);cursor:pointer">Zaznaczone NIE ('+nies.length+')</summary>';
-      h+='<div style="background:var(--bg2);padding:6px 8px;border-radius:var(--rs);font:300 10px var(--fb);color:var(--t2);margin-top:4px">';
-      nies.forEach(([k])=>{h+='<div>○ '+esc(k)+'</div>';});
+      // FIX 1: zaznaczone NIE są teraz ROZWINIĘTE (open) — kosmetolog widzi pełną listę
+      // od razu, bez dodatkowego klikania. Wszystkie pozycje są częścią dokumentacji.
+      h+='<details open style="margin-top:6px"><summary style="font:600 10px var(--fb);color:var(--sc);cursor:pointer;padding:4px 0">✓ Zaznaczone NIE (klient nie ma tych przeciwwskazań) — '+nies.length+'</summary>';
+      h+='<div style="background:var(--sb);padding:8px;border-radius:var(--rs);font:400 10px var(--fb);color:var(--t);margin-top:4px;border-left:2px solid var(--sc)">';
+      nies.forEach(([k])=>{h+='<div style="padding:1px 0">○ '+esc(k)+'</div>';});
       h+='</div></details>';
     }
   }
+  // FIX 1: PEŁNA TREŚĆ ZGODY z szablonu T — przeciwwskazania, możliwe reakcje,
+  // zalecenia pozabiegowe, zakazy, higiena. Wcześniej viewConsent pokazywał TYLKO odpowiedzi
+  // klienta (TAK/NIE), bez kontekstu dokumentu który podpisał. To było niezgodne z RODO
+  // (kosmetolog nie widział pełnej zawartości podpisanego dokumentu).
+  const tmpl=T.find(t=>t.id===co.treatmentId);
+  if(tmpl){
+    h+='<div class="ct" style="font-size:11px;margin-top:14px;color:var(--t);border-top:2px solid var(--bd);padding-top:8px">📋 Pełna treść formularza zgody</div>';
+    if(tmpl.description){
+      h+='<div style="background:var(--bg2);padding:8px;border-radius:var(--rs);font:400 11px var(--fb);margin-top:4px">'+esc(tmpl.description)+'</div>';
+    }
+    if(tmpl.info){
+      h+='<div style="background:var(--db);border-left:3px solid var(--dn);padding:8px;border-radius:var(--rs);font:400 10px var(--fb);margin-top:4px">ℹ️ '+esc(tmpl.info)+'</div>';
+    }
+    // Wywiad zdrowotny (np. dla manicure/pedicure)
+    if(tmpl.health_interview&&tmpl.health_interview.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px">📝 Wywiad zdrowotny</div>';
+      h+='<ul style="background:var(--bg2);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.7">';
+      tmpl.health_interview.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Przeciwwskazania bezwzględne
+    if(tmpl.contraindications_absolute&&tmpl.contraindications_absolute.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--dn)">🚫 Przeciwwskazania bezwzględne</div>';
+      h+='<ul style="background:var(--db);border-left:3px solid var(--dn);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+      tmpl.contraindications_absolute.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Przeciwwskazania bezwzględne dla elektroakupunktury
+    if(tmpl.contraindications_absolute_electro&&tmpl.contraindications_absolute_electro.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--dn)">⚡ Przeciwwskazania — elektroakupunktura</div>';
+      h+='<ul style="background:var(--db);border-left:3px solid var(--dn);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+      tmpl.contraindications_absolute_electro.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Przeciwwskazania względne
+    if(tmpl.contraindications_relative&&tmpl.contraindications_relative.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--wn)">⚠ Przeciwwskazania względne</div>';
+      h+='<ul style="background:var(--wb);border-left:3px solid var(--wn);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+      tmpl.contraindications_relative.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Możliwe reakcje
+    if(tmpl.possible_reactions&&tmpl.possible_reactions.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px">🔬 Możliwe reakcje pozabiegowe</div>';
+      h+='<ul style="background:var(--bg2);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+      tmpl.possible_reactions.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Zalecenia pozabiegowe
+    if(tmpl.recommendations_after&&tmpl.recommendations_after.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--sc)">✅ Zalecenia pozabiegowe</div>';
+      h+='<ul style="background:var(--sb);border-left:3px solid var(--sc);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+      tmpl.recommendations_after.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Zakazy po zabiegu
+    if(tmpl.forbidden_after&&tmpl.forbidden_after.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--dn)">🚷 Zakazy po zabiegu</div>';
+      h+='<ul style="background:var(--db);border-left:3px solid var(--dn);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+      tmpl.forbidden_after.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Higiena pozabiegowa (np. mezoterapia estGen)
+    if(tmpl.hygiene_after&&tmpl.hygiene_after.length){
+      h+='<div class="ct" style="font-size:10px;margin-top:8px">🧼 Higiena pozabiegowa</div>';
+      h+='<ul style="background:var(--bg2);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+      tmpl.hygiene_after.forEach(c=>{h+='<li>'+esc(c)+'</li>';});
+      h+='</ul>';
+    }
+    // Oświadczenie klienta
+    h+='<div class="ct" style="font-size:10px;margin-top:8px;color:var(--sc)">✍ Oświadczenie klienta (zaakceptowane podpisem)</div>';
+    h+='<ul style="background:var(--sb);border-left:3px solid var(--sc);padding:8px 8px 8px 24px;border-radius:var(--rs);font:400 10px var(--fb);margin:4px 0;line-height:1.6">';
+    ["Zostałam/em poinformowana/y o przeciwwskazaniach, technice, efektach i powikłaniach.","Udzieliłam/em prawdziwych informacji o stanie zdrowia.","Jestem zdrowa/y, nie pod wpływem alkoholu/środków odurzających.","Miałam/em czas na pytania i przeczytanie dokumentu.","Wyrażam świadomą zgodę na zabieg."].forEach(s=>{h+='<li>'+esc(s)+'</li>';});
+    h+='</ul>';
+  }
   // Parametry zabiegu + notatki kosmetologa
-  if(co.params){h+='<div class="ct" style="font-size:10px;margin-top:8px">Parametry zabiegu</div><div style="background:var(--bg2);padding:6px 8px;border-radius:var(--rs);font:400 11px var(--fb);white-space:pre-wrap">'+esc(co.params)+'</div>';}
-  if(co.notes){h+='<div class="ct" style="font-size:10px;margin-top:8px">Notatki</div><div style="background:var(--bg2);padding:6px 8px;border-radius:var(--rs);font:400 11px var(--fb);white-space:pre-wrap">'+esc(co.notes)+'</div>';}
+  if(co.params){h+='<div class="ct" style="font-size:10px;margin-top:8px">Parametry zabiegu (wpisane przez kosmetologa)</div><div style="background:var(--bg2);padding:6px 8px;border-radius:var(--rs);font:400 11px var(--fb);white-space:pre-wrap">'+esc(co.params)+'</div>';}
+  if(co.notes){h+='<div class="ct" style="font-size:10px;margin-top:8px">Notatki kosmetologa</div><div style="background:var(--bg2);padding:6px 8px;border-radius:var(--rs);font:400 11px var(--fb);white-space:pre-wrap">'+esc(co.notes)+'</div>';}
   // Zdjęcia przed/po — większe, klikalne do lightbox
   if(co.photoBefore||co.photoAfter){
     h+='<div class="ct" style="font-size:10px;margin-top:8px">Zdjęcia</div><div style="display:flex;gap:8px;flex-wrap:wrap">';
@@ -3609,44 +3733,70 @@ async function viewConsent(conId){
   document.getElementById("modal").classList.add("on");
 }
 
-// Inline preview PDF — dla osób które chcą zobaczyć dokładnie tę treść którą klient
-// zobaczy w PDFie, bez konieczności pobierania pliku. Generujemy PDF blob i wstawiamy
-// w iframe wewnątrz modalu. Działa offline.
+// Inline preview PDF — generujemy PDF blob i wstawiamy w iframe wewnątrz modalu.
+// FIX 2: wcześniej używał tymczasowego diva który gubił treść po viewConsent, teraz
+// rendererem jest sam modC (po viewConsent) — z tymi samymi rozszerzeniami stylu co
+// downloadConsentPDF. Dzięki temu PDF inline = PDF download = pełna zgoda.
 async function previewConsentPDFInline(conId){
   const cons=await dbGetAll("consents");const co=cons.find(x=>x.id===conId);
   if(!co){toast("Nie znaleziono zgody");return;}
-  const cls=await dbGetAll("clients");const cl=cls.find(x=>x.id===co.clientId);
-  // Pokażemy spinner
-  const mc=document.getElementById("modC");
-  mc.innerHTML='<h3>📄 Generowanie podglądu PDF...</h3><div style="text-align:center;padding:40px"><div style="font-size:32px">⏳</div><div style="font:400 12px var(--fb);color:var(--t2);margin-top:8px">Render może potrwać do 5 sekund dla zgód ze zdjęciami</div></div>';
-  document.getElementById("modal").classList.add("on");
-  // Renderuje viewConsent w ukrytym kontenerze, robi html2canvas → jsPDF → Blob URL → iframe.
-  // To samo co downloadConsentPDF, tylko zamiast `pdf.save()` robimy `pdf.output('bloburl')`.
+  // Najpierw wyrenderuj viewConsent w modC (rozbudowany z FIX 1)
+  await viewConsent(conId);
+  const el=document.getElementById("modC");
+  if(!el){toast("Błąd: brak modala");return;}
+  toast("Generuję podgląd PDF...");
+  const origMaxH=el.style.maxHeight;
+  const origOverflow=el.style.overflow;
+  const origH=el.style.height;
+  el.style.maxHeight="none";el.style.overflow="visible";el.style.height="auto";
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+  let blobUrl=null;
   try{
-    // Tymczasowo wyrenderuj viewConsent w ukrytym divie żeby html2canvas miał z czego rysować
-    const tmp=document.createElement("div");
-    tmp.style.cssText="position:fixed;left:-99999px;top:0;width:840px;background:#FAFAF7;padding:20px";
-    tmp.id="_pdfPreviewTmp";
-    document.body.appendChild(tmp);
-    // Skopiuj zawartość viewConsent (bez przycisków)
-    await viewConsent(conId);
-    const realMc=document.getElementById("modC");
-    tmp.innerHTML=realMc.innerHTML;
-    tmp.querySelectorAll(".brow").forEach(e=>e.remove()); // usuń przyciski z preview
-    const c=await html2canvas(tmp,{scale:1.5,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:840});
-    document.body.removeChild(tmp);
-    const{jsPDF}=window.jspdf;const pw=210,iw=pw-20,ih=(c.height*iw)/c.width;
-    const pdf=new jsPDF("p","mm","a4");let rem=ih,sy=0;
-    while(rem>0){if(sy>0)pdf.addPage();const pH=Math.min(rem,277),sH=(pH/ih)*c.height;const sl=document.createElement("canvas");sl.width=c.width;sl.height=sH;sl.getContext("2d").drawImage(c,0,sy,c.width,sH,0,0,c.width,sH);pdf.addImage(sl.toDataURL("image/jpeg",.88),"JPEG",10,10,iw,pH);sy+=sH;rem-=pH;}
-    const blobUrl=pdf.output("bloburl");
-    const mc2=document.getElementById("modC");
-    mc2.style.maxWidth="95vw";mc2.style.width="95vw";mc2.style.maxHeight="95vh";
-    mc2.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📄 Pełen podgląd PDF — '+esc(co.treatmentName||"")+'</h3><div class="brow" style="margin:0"><button class="b bs bsm" onclick="downloadConsentPDF('+conId+')">📥 Pobierz</button><button class="b b2 bsm" onclick="viewConsent('+conId+')">↩ Wróć</button><button class="b b2 bsm" onclick="closeMo()">✕</button></div></div>'+
-      '<iframe src="'+blobUrl+'" style="width:100%;height:80vh;border:1px solid var(--bd);border-radius:var(--rs);background:#525659"></iframe>';
+    el.querySelectorAll(".brow").forEach(b=>b.style.display="none");
+    const detailsState=[];
+    el.querySelectorAll("details").forEach(d=>{detailsState.push([d,d.open]);d.open=true;});
+    const realWidth=Math.max(el.scrollWidth,840);
+    const c=await html2canvas(el,{scale:2,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:realWidth,scrollY:-window.scrollY,height:el.scrollHeight,windowHeight:el.scrollHeight});
+    detailsState.forEach(([d,was])=>{d.open=was;});
+    el.querySelectorAll(".brow").forEach(b=>b.style.display="");
+    const{jsPDF}=window.jspdf;
+    const PW=210,PH=297,MARGIN=12,IW=PW-2*MARGIN;
+    const ih=(c.height*IW)/c.width;
+    const PAGE_USABLE=PH-2*MARGIN;
+    const PAGE_OVERLAP_MM=8;
+    const pdf=new jsPDF("p","mm","a4");
+    let mmConsumed=0,sy=0;
+    while(mmConsumed<ih){
+      if(mmConsumed>0)pdf.addPage();
+      const rem=ih-mmConsumed;
+      const pH=Math.min(rem,PAGE_USABLE);
+      const sH=(pH/ih)*c.height;
+      const sl=document.createElement("canvas");
+      sl.width=c.width;sl.height=sH;
+      sl.getContext("2d").drawImage(c,0,sy,c.width,sH,0,0,c.width,sH);
+      pdf.addImage(sl.toDataURL("image/jpeg",.92),"JPEG",MARGIN,MARGIN,IW,pH);
+      const pageNum=pdf.internal.getNumberOfPages();
+      pdf.setFontSize(8);pdf.setTextColor(120);
+      pdf.text("Strona "+pageNum,PW-MARGIN,PH-4,{align:"right"});
+      pdf.setTextColor(0);
+      const consumed=pH-(rem>PAGE_USABLE?PAGE_OVERLAP_MM:0);
+      mmConsumed+=consumed;
+      sy+=(consumed/ih)*c.height;
+    }
+    blobUrl=pdf.output("bloburl");
   }catch(e){
     console.error("previewConsentPDFInline:",e);
-    document.getElementById("modC").innerHTML='<h3>❌ Błąd generowania podglądu</h3><div class="db" style="border-left-color:var(--dn)">'+esc(e.message||"nieznany")+'</div><div class="brow"><button class="b b2" onclick="viewConsent('+conId+')">↩ Wróć do zgody</button><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+    toast("Błąd: "+e.message);
+    el.style.maxHeight=origMaxH;el.style.overflow=origOverflow;el.style.height=origH;
+    return;
   }
+  // Przywróć styl
+  el.style.maxHeight=origMaxH;el.style.overflow=origOverflow;el.style.height=origH;
+  // Pokaż iframe z PDF
+  const mc2=document.getElementById("modC");
+  mc2.style.maxWidth="95vw";mc2.style.width="95vw";mc2.style.maxHeight="95vh";
+  mc2.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px"><h3 style="margin:0">📄 Pełen podgląd PDF — '+esc(co.treatmentName||"")+'</h3><div class="brow" style="margin:0"><button class="b bs bsm" onclick="downloadConsentPDF('+conId+')">📥 Pobierz</button><button class="b b2 bsm" onclick="viewConsent('+conId+')">↩ Wróć do zgody</button><button class="b b2 bsm" onclick="closeMo()">✕</button></div></div>'+
+    '<iframe src="'+blobUrl+'" style="width:100%;height:80vh;border:1px solid var(--bd);border-radius:var(--rs);background:#525659"></iframe>';
 }
 
 // Generuje PDF-a z treści zgody (taki jak viewConsent wyżej). Używa jsPDF + html2canvas.
@@ -3658,10 +3808,27 @@ async function downloadConsentPDF(conId){
   const el=document.getElementById("modC");
   if(!el){toast("Błąd: brak zawartości");return;}
   toast("Generuję PDF...");
+  // FIX 2: Zapisz oryginalne style i tymczasowo ekspanduj modC żeby html2canvas
+  // miał dostęp do PEŁNEJ wysokości zawartości. Bez tego scrollująca się treść
+  // (modal ma max-height:95vh + overflow:auto) była renderowana tylko do widocznego
+  // fragmentu — stąd niepełny PDF.
+  const origMaxH=el.style.maxHeight;
+  const origOverflow=el.style.overflow;
+  const origH=el.style.height;
+  el.style.maxHeight="none";
+  el.style.overflow="visible";
+  el.style.height="auto";
+  // Daj layoutowi przeliczyć wysokość przed render (1 frame)
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
   try{
     el.querySelectorAll(".brow").forEach(b=>b.style.display="none");
+    // Rozwiń wszystkie <details> żeby ich zawartość była w PDFie
+    const detailsState=[];
+    el.querySelectorAll("details").forEach(d=>{detailsState.push([d,d.open]);d.open=true;});
     const realWidth=Math.max(el.scrollWidth,840);
-    const c=await html2canvas(el,{scale:2,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:realWidth,scrollY:-window.scrollY});
+    const c=await html2canvas(el,{scale:2,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:realWidth,scrollY:-window.scrollY,height:el.scrollHeight,windowHeight:el.scrollHeight});
+    // Przywróć stan details
+    detailsState.forEach(([d,was])=>{d.open=was;});
     el.querySelectorAll(".brow").forEach(b=>b.style.display="");
     const{jsPDF}=window.jspdf;
     const PW=210,PH=297,MARGIN=12,IW=PW-2*MARGIN;
@@ -3696,6 +3863,11 @@ async function downloadConsentPDF(conId){
     console.error("PDF error:",e);
     toast("Błąd generowania PDF: "+e.message);
     el.querySelectorAll(".brow").forEach(b=>b.style.display="");
+  }finally{
+    // Przywróć oryginalne style modala — bez tego po pobraniu PDF modal byłby ekspandowany
+    el.style.maxHeight=origMaxH;
+    el.style.overflow=origOverflow;
+    el.style.height=origH;
   }
 }
 async function delCl(id){if(!confirm("Usunąć? Wszystkie zgody i wizyty tego klienta zostaną usunięte."))return;await dbDel("clients",id);supaDelete("clients",id);const cons=await dbGetAll("consents");for(const c of cons)if(c.clientId===id){await dbDel("consents",c.id);supaDelete("consents",c.id);}const appts=await dbGetAll("appointments");for(const a of appts)if(a.clientId===id){await dbDel("appointments",a.id);supaDelete("appointments",a.id);}const photos=await dbGetAll("clientPhotos");for(const p of photos)if(p.clientId===id){await dbDel("clientPhotos",p.id);}toast("✓");showV("clients");}
@@ -3801,16 +3973,77 @@ async function editClientPhotoNote(photoId,cid){
 function openGalleryUpload(cid){
   let h='<h3>📸 Dodaj zdjęcia do galerii</h3>';
   h+='<div class="db">Zdjęcia przechowywane są lokalnie w tym urządzeniu. Kompresowane do max 1200px szerokości / JPEG 0.8 żeby nie zapychać pamięci.</div>';
-  h+='<div class="fl"><label>Wybierz zdjęcia (wielokrotny wybór możliwy)</label>';
+  // FIX 4: Przycisk "Zrób zdjęcie aparatem" — uruchamia openCam dedykowane dla galerii.
+  // Wcześniej kosmetolog musiał ręcznie otworzyć aparat na tablecie / wybrać "kamera" z galerii.
+  h+='<div class="brow" style="margin-bottom:10px"><button class="b bs bsm" onclick="openCamForGallery('+cid+')" style="flex:1">📸 Zrób zdjęcie aparatem (zalecane)</button></div>';
+  h+='<div class="fl"><label>Lub wybierz z galerii / pliku (wielokrotny wybór możliwy)</label>';
   h+='<input type="file" id="galFiles" accept="image/*" multiple style="font:400 11px var(--fb)">';
   h+='</div>';
   h+='<div class="fl"><label>Notatka (opcjonalnie — dotyczy wszystkich dodawanych zdjęć)</label>';
   h+='<input type="text" id="galNote" maxlength="100" placeholder="np. Przed serią BioRePeel / Reakcja 3h po zabiegu">';
   h+='</div>';
   h+='<div id="galProgress" style="display:none;margin-top:8px"></div>';
-  h+='<div class="brow" style="margin-top:10px"><button class="b bs" id="galBtnSave" onclick="uploadClientPhotos('+cid+')">💾 Zapisz</button><button class="b b2" onclick="closeMo()">Anuluj</button></div>';
+  h+='<div class="brow" style="margin-top:10px"><button class="b bs" id="galBtnSave" onclick="uploadClientPhotos('+cid+')">💾 Zapisz wybrane z pliku</button><button class="b b2" onclick="closeMo()">Anuluj</button></div>';
   document.getElementById("modC").innerHTML=h;
   document.getElementById("modal").classList.add("on");
+}
+
+// FIX 4: Aparat dedykowany dla galerii klienta — różni się od openCam tym że
+// po zrobieniu zdjęcia zapisuje od razu do clientPhotos (nie do photos.before/after).
+// Pozwala też zrobić wiele zdjęć w sesji (po zapisie wraca do widoku aparatu).
+async function openCamForGallery(cid){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280}}});
+    const mc=document.getElementById("modC");
+    mc.innerHTML='<h3>📸 Zrób zdjęcie do galerii</h3>'+
+      '<div style="position:relative;border-radius:var(--r);overflow:hidden;background:#000;margin-bottom:8px"><video id="galCamV" autoplay playsinline style="width:100%;display:block"></video><canvas id="galCamCv" style="display:none"></canvas></div>'+
+      '<div class="fl"><label>Notatka (opcjonalnie)</label>'+
+      '<input type="text" id="galCamNote" maxlength="100" placeholder="np. Twarz po zabiegu BioRePeel"></div>'+
+      '<div class="brow"><button class="b bs" onclick="snapCamForGallery('+cid+',false)">📸 Zrób i zapisz</button>'+
+      '<button class="b b1 bsm" onclick="snapCamForGallery('+cid+',true)" title="Zapisuje i pozwala zrobić kolejne zdjęcie">📸+ Zrób i kolejne</button>'+
+      '<button class="b b2" onclick="stopGalCam();closeMo()">Anuluj</button></div>';
+    document.getElementById("modal").classList.add("on");
+    document.getElementById("galCamV").srcObject=stream;
+    window._galCamStream=stream;
+  }catch(err){
+    console.warn("openCamForGallery:",err);
+    toast("⚠ Nie udało się otworzyć aparatu — użyj wyboru z galerii zamiast tego");
+    openGalleryUpload(cid);
+  }
+}
+function stopGalCam(){
+  if(window._galCamStream){
+    window._galCamStream.getTracks().forEach(t=>t.stop());
+    window._galCamStream=null;
+  }
+}
+async function snapCamForGallery(cid,andContinue){
+  const v=document.getElementById("galCamV"),c=document.getElementById("galCamCv");
+  if(!v||!c)return;
+  c.width=v.videoWidth;c.height=v.videoHeight;
+  c.getContext("2d").drawImage(v,0,0);
+  // Kompresja do <=1200px (zgodnie z konwencją galerii)
+  const MAX=1200;
+  let outCv=c;
+  if(c.width>MAX){
+    const scale=MAX/c.width;
+    outCv=document.createElement("canvas");
+    outCv.width=MAX;outCv.height=Math.round(c.height*scale);
+    outCv.getContext("2d").drawImage(c,0,0,outCv.width,outCv.height);
+  }
+  const data=outCv.toDataURL("image/jpeg",.85);
+  const note=(document.getElementById("galCamNote")?.value||"").trim();
+  await dbAdd("clientPhotos",{clientId:cid,data,note,filename:"camera_"+Date.now()+".jpg",createdAt:new Date().toISOString()});
+  if(andContinue){
+    // Wyczyść notatkę i zostań w aparacie żeby zrobić kolejne
+    const inp=document.getElementById("galCamNote");if(inp)inp.value="";
+    toast("✓ Zapisano — zrób następne");
+    return;
+  }
+  stopGalCam();
+  closeMo();
+  toast("✓ Zdjęcie zapisane do galerii");
+  renderClientGallery(cid);
 }
 
 async function uploadClientPhotos(cid){
@@ -5604,17 +5837,49 @@ function openMassSMS(){
      '</select></div>';
   h+='<div class="fl"><label>Konkretny zabieg do wstawienia w {trt} (opcjonalnie)</label><select id="mssTrt"><option value="">— bez podmiany —</option>'+FM.map((m,i)=>'<option value="'+esc(m.name)+'">'+esc(m.cat)+': '+esc(m.name)+'</option>').join("")+'</select></div>';
   h+='<div class="fl"><label>Treść SMS (edytuj przed wysłaniem)</label><textarea id="mssTxt" rows="6" style="width:100%;font:400 11px var(--fb);padding:8px;border:1.5px solid var(--bd);border-radius:var(--rs)" oninput="updMSSChars()" placeholder="Wpisz lub wybierz szablon..."></textarea><span class="input-hint" id="mssChars">0 zn. · 0 SMS</span></div>';
-  // Lista klientów (z odhaczaniem tych bez telefonu)
+  // FIX 5: Lista klientów z analizą zgód marketingowych — KRYTYCZNE dla zgodności z prawem.
+  // Art. 172 Prawa Telekomunikacyjnego + UŚUDE: SMS marketingowy WYMAGA wcześniejszej zgody.
+  // Pokazujemy kosmetologowi 3 grupy: ze zgodą / bez zgody / bez tel — żeby świadomie wybrał
+  // do kogo wysłać. Domyślnie tylko klienci ze zgodą lecą do "Wyślij" (defensywa).
   dbGetAll("clients").then(async cls=>{
+    const cons=await dbGetAll("consents");
     const selected=cls.filter(c=>ids.includes(c.id));
-    const withPhone=selected.filter(c=>c.phone);
+    // Per klient: czy ma JAKĄKOLWIEK zgodę marketingową (z dowolnej historycznej zgody)
+    const marketingByClient={};
+    cons.forEach(co=>{if(co.marketing)marketingByClient[co.clientId]=co.date||co.createdAt||"";});
+    const withConsentAndPhone=selected.filter(c=>c.phone&&marketingByClient[c.id]);
+    const noConsentButPhone=selected.filter(c=>c.phone&&!marketingByClient[c.id]);
     const noPhone=selected.filter(c=>!c.phone);
-    let lh='<div class="ct" style="margin-top:8px">Odbiorcy ('+withPhone.length+' z '+selected.length+')</div>';
-    lh+='<div style="max-height:120px;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--rs);padding:6px;background:var(--bg);font:400 10px var(--fb)">';
-    withPhone.forEach(c=>{lh+='<div>✓ '+esc(c.name)+' <span style="color:var(--t2)">'+esc(c.phone)+'</span></div>';});
-    noPhone.forEach(c=>{lh+='<div style="color:var(--wn)">✗ '+esc(c.name)+' (brak tel.)</div>';});
+    let lh='<div class="ct" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">📋 Odbiorcy ('+selected.length+')';
+    if(noConsentButPhone.length){
+      lh+='<label style="display:flex;align-items:center;gap:4px;font:300 10px var(--fb);color:var(--t2);cursor:pointer"><input type="checkbox" id="mssOnlyConsent" checked onchange="_renderMSSRecipientsList()" style="accent-color:var(--g);width:14px;height:14px"> Tylko ze zgodą marketingową</label>';
+    }
+    lh+='</div>';
+    if(noConsentButPhone.length){
+      lh+='<div class="db" style="background:var(--db);border-left:3px solid var(--dn);font:400 10px var(--fb);padding:8px 10px"><strong>⚠ '+noConsentButPhone.length+'</strong> klient(ów) nie ma zgody marketingowej. Wysyłka SMS-a promocyjnego do nich byłaby naruszeniem <strong>art. 172 Prawa Telekomunikacyjnego</strong> i RODO. Domyślnie ich pomijamy.</div>';
+    }
+    lh+='<div id="mssRecipientList" style="max-height:160px;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--rs);padding:6px;background:var(--bg);font:400 10px var(--fb)">';
+    // Klienci ze zgodą — zielona ✓
+    if(withConsentAndPhone.length){
+      lh+='<div style="font:600 10px var(--fb);color:var(--sc);padding:2px 0;margin-bottom:2px">✅ Ze zgodą marketingową ('+withConsentAndPhone.length+'):</div>';
+      withConsentAndPhone.forEach(c=>{
+        const dt=marketingByClient[c.id]?(" · zgoda od "+marketingByClient[c.id].substring(0,10)):"";
+        lh+='<div style="padding:1px 0">✓ '+esc(c.name)+' <span style="color:var(--t2)">'+esc(c.phone)+dt+'</span></div>';
+      });
+    }
+    // Bez zgody — żółty ⚠
+    if(noConsentButPhone.length){
+      lh+='<div class="mss-no-consent" style="font:600 10px var(--fb);color:var(--wn);padding:6px 0 2px;margin-top:6px;border-top:1px dashed var(--bd)">⚠ Bez zgody marketingowej ('+noConsentButPhone.length+') — wymagałoby wcześniejszej zgody:</div>';
+      noConsentButPhone.forEach(c=>{
+        lh+='<div class="mss-no-consent" style="padding:1px 0;color:var(--wn)">⚠ '+esc(c.name)+' <span style="color:var(--t2)">'+esc(c.phone)+'</span></div>';
+      });
+    }
+    // Bez telefonu — czerwone ✗
+    noPhone.forEach(c=>{lh+='<div style="color:var(--dn);padding:1px 0">✗ '+esc(c.name)+' (brak tel.)</div>';});
     lh+='</div>';
     document.getElementById("mssRecipients").innerHTML=lh;
+    // Inicjalnie ukryj sekcję "bez zgody" (checkbox domyślnie zaznaczony)
+    setTimeout(_renderMSSRecipientsList,30);
   });
   h+='<div id="mssRecipients"></div>';
   h+='<div class="brow" style="margin-top:10px"><button class="b bs" onclick="sendMassSMS()">📱 Wyślij do wszystkich (pojedynczo)</button><button class="b b2" onclick="closeMo()">Anuluj</button></div>';
@@ -5649,15 +5914,43 @@ function updMSSChars(){
   document.getElementById("mssChars").textContent=l+" zn. · "+smsCount+" SMS"+(l>160?" (multi-part)":"");
 }
 
+function _renderMSSRecipientsList(){
+  // Pokazuje/ukrywa sekcję "bez zgody" w zależności od checkboxa.
+  const onlyWithConsent=document.getElementById("mssOnlyConsent")?.checked;
+  document.querySelectorAll("#mssRecipientList .mss-no-consent").forEach(el=>{
+    el.style.display=onlyWithConsent?"none":"";
+  });
+}
+
 async function sendMassSMS(){
   const txt=document.getElementById("mssTxt").value.trim();
   if(!txt){toast("Napisz treść SMS");return;}
   const ids=Array.from(_selected);
   const cls=await dbGetAll("clients");
-  const recipients=cls.filter(c=>ids.includes(c.id)&&c.phone);
-  if(!recipients.length){toast("Brak odbiorców z numerem telefonu");return;}
+  const cons=await dbGetAll("consents");
+  const marketingByClient={};
+  cons.forEach(co=>{if(co.marketing)marketingByClient[co.clientId]=co.date||co.createdAt||"";});
+  const onlyWithConsent=document.getElementById("mssOnlyConsent")?.checked!==false; // domyślnie true
+  let recipients=cls.filter(c=>ids.includes(c.id)&&c.phone);
+  // FIX 5: Filtrujemy po zgodzie marketingowej zgodnie z wyborem kosmetologa
+  if(onlyWithConsent){
+    const skipped=recipients.length;
+    recipients=recipients.filter(c=>marketingByClient[c.id]);
+    const skippedCount=skipped-recipients.length;
+    if(skippedCount>0){
+      const proceed=confirm("Pomijam "+skippedCount+" klient(ów) bez zgody marketingowej (zgodnie z art. 172 Prawa Telekomunikacyjnego).\n\nWyślę SMS do "+recipients.length+" klient(ów). Kontynuować?");
+      if(!proceed)return;
+    }
+  }else{
+    // Wybrano "wyślij wszystkim" — wymagamy świadomej zgody kosmetologa, że bierze odpowiedzialność
+    const noConsent=recipients.filter(c=>!marketingByClient[c.id]).length;
+    if(noConsent>0){
+      const proceed=confirm("⚠ UWAGA — RYZYKO PRAWNE\n\n"+noConsent+" odbiorcy NIE wyrazili zgody marketingowej.\n\nWysyłka SMS-a promocyjnego do nich może stanowić naruszenie:\n• art. 172 Prawa Telekomunikacyjnego\n• art. 10 UŚUDE\n• RODO art. 6\n\nKlient może to zgłosić do UOKiK / UODO.\n\nCZY POTWIERDZASZ ŚWIADOMIE WYSYŁKĘ?");
+      if(!proceed)return;
+    }
+  }
+  if(!recipients.length){toast("Brak odbiorców z numerem telefonu i wymaganą zgodą");return;}
   const trtOverride=document.getElementById("mssTrt").value;
-  // Zapisz kontekst wysyłki w module — będzie go czytał renderMassSMSList po każdym kliknięciu
   window._massSMSCtx={txt,trtOverride,recipients,sent:new Set()};
   renderMassSMSQueue();
 }
@@ -6102,8 +6395,34 @@ function showKioskChoice(){
   const trName=tSel.options[tSel.selectedIndex]?.textContent||"zabieg";
   const modC=document.getElementById("modC");
   if(!modC)return;
+  // FIX 3: Najpierw monit o klienta jeśli nie wybrany — wcześniejszy flow pozwalał oddać tablet
+  // klientowi bez sprawdzenia czy w polach są dane, co prowadziło do podpisania zgody na "puste"
+  // dane klienta. Teraz: jeśli klient nie został ani wpisany w pola, ani wybrany z bazy →
+  // pokaż wyraźny monit ze ścieżkami: wybierz z bazy / utwórz nowego.
+  const hasName=(document.getElementById("fN")?.value||"").trim().length>0;
+  const hasPhone=(document.getElementById("fP")?.value||"").trim().length>0;
+  if(!hasName||!hasPhone){
+    modC.innerHTML='<h3 style="text-align:center;margin-bottom:14px">⚠ Najpierw wybierz klienta</h3>'+
+      '<div class="db" style="text-align:center;font:400 11px var(--fb);margin-bottom:14px;background:var(--wb);border-left-color:var(--wn)">Aby przejść dalej z zabiegiem <strong>'+esc(trName)+'</strong>, musisz najpierw wybrać klienta z bazy lub dodać nowego.<br><span style="font:300 10px var(--fb);color:var(--t2);display:block;margin-top:4px">Bez danych klienta zgoda nie jest ważna prawnie (RODO).</span></div>'+
+      '<div style="display:grid;grid-template-columns:1fr;gap:10px">'+
+        '<button class="b bs" style="padding:14px 12px;text-align:left;display:flex;align-items:center;gap:12px" onclick="closeMo();_focusClientSearch()">'+
+          '<span style="font-size:28px">🔍</span>'+
+          '<span><strong style="font:700 13px var(--fb);display:block">Wyszukaj klienta z bazy</strong>'+
+          '<span style="font:300 10px var(--fb);opacity:.85">Wpisz imię, nazwisko lub telefon</span></span>'+
+        '</button>'+
+        '<button class="b b1" style="padding:14px 12px;text-align:left;display:flex;align-items:center;gap:12px" onclick="closeMo();openNewClientForConsent()">'+
+          '<span style="font-size:28px">➕</span>'+
+          '<span><strong style="font:700 13px var(--fb);display:block">Dodaj nowego klienta</strong>'+
+          '<span style="font:300 10px var(--fb);opacity:.85">Pierwsza wizyta — wprowadź dane</span></span>'+
+        '</button>'+
+        '<button class="b b2 bsm" onclick="closeMo()" style="margin-top:6px">Anuluj — wpiszę dane ręcznie</button>'+
+      '</div>';
+    document.getElementById("modal").classList.add("on");
+    return;
+  }
+  // Klient już wybrany / wpisany — kontynuuj normalny flow wyboru trybu kiosk/kosmetolog
   modC.innerHTML='<h3 style="text-align:center;margin-bottom:14px">Kto wypełnia formularz?</h3>'+
-    '<div class="db" style="text-align:center;font:400 11px var(--fb);margin-bottom:16px">Wybrany zabieg: <strong>'+esc(trName)+'</strong></div>'+
+    '<div class="db" style="text-align:center;font:400 11px var(--fb);margin-bottom:16px">Wybrany zabieg: <strong>'+esc(trName)+'</strong><br><span style="font:300 10px var(--fb);color:var(--t2)">Klient: '+esc((document.getElementById("fN")?.value||"").trim())+'</span></div>'+
     '<div style="display:grid;grid-template-columns:1fr;gap:10px">'+
       '<button class="b bs" style="padding:18px 12px;text-align:left;display:flex;align-items:center;gap:14px" onclick="closeMo();kioskEnter()">'+
         '<span style="font-size:34px">👤</span>'+
@@ -6117,6 +6436,18 @@ function showKioskChoice(){
       '</button>'+
     '</div>';
   document.getElementById("modal").classList.add("on");
+}
+
+// Pomocnik — focus na pole wyszukiwania klienta z animacją podświetlenia.
+function _focusClientSearch(){
+  const inp=document.getElementById("fClSrch");
+  if(!inp){toast("Najpierw wybierz zabieg, żeby pojawiła się wyszukiwarka klienta");return;}
+  inp.focus();
+  inp.scrollIntoView({behavior:"smooth",block:"center"});
+  // Krótkie podświetlenie
+  inp.style.transition="background .3s,box-shadow .3s";
+  inp.style.boxShadow="0 0 0 4px rgba(50,150,80,.4)";
+  setTimeout(()=>{inp.style.boxShadow="";},1500);
 }
 
 function kioskExit(){
