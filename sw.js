@@ -1,28 +1,28 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.5  |  2026-04-26
- *  Zmiany v1.2.5 (UX hotfix po teście):
- *   • Aparat — defensywne sprawdzanie HTTPS + uprawnień + fallback do galerii
- *   • Usuwanie produktów — naprawione "rezurekcje" (PULL przed PUSH w globalFullSync)
- *   • Po zapisie zgody: ujednolicony ekran handover (klient widzi tylko podziękowanie + 2 akcje)
- *   • Przycisk "Oddaj tablet kosmetologowi" chroniony PIN-em
- *   • PDF nie zawiera już "Przekaż tablet kosmetologowi" ani panelu kosmetologa
- *   • Strefa klienta (kiosk-mode): ukryte "Wyszukaj zabieg", "Znaleziono szkic"
- *   • Po wyborze klienta z bazy automatycznie dialog "Tablet dla klienta / Wypełniam ja"
- *   • "Nowa zgoda dla kolejnego klienta" — pełny reset stanu
- *   • "Dodaj zdjęcia, parametry" — ukrywa handover żeby panel był widoczny
- *  Zmiany v1.2.4:
- *   • Pełny podgląd zgody (wszystkie sekcje T)
- *   • PDF download/preview ekspanduje modal
- *   • Monit "Najpierw wybierz klienta"
- *   • Aparat foto w galerii klienta
- *   • Status zgód RODO/marketing/wizerunek w profilu klienta
- *   • Mass SMS filtruje wg zgody marketingowej
+ *  Wersja: 1.2.6  |  2026-04-26
+ *  Zmiany v1.2.6 (Sprzedaż + UX):
+ *   • NOWY widok 🛍 Sprzedaż produktów (POS) — oddzielny od panelu zabiegowego
+ *     - Wybór klienta z bazy (autocomplete) lub sprzedaż bez przypisania
+ *     - Picker produktów retail z magazynu (kategorie, wyszukiwarka, stan)
+ *     - Koszyk z edycją ilości i ceny per pozycja, automatyczne sumowanie
+ *     - Zapis tworzy stockMoves + dekrementuje stan, pełna historia per saleId
+ *     - Możliwość usunięcia całej transakcji (przywraca stan magazynu)
+ *   • Usunięto upselling produktów z panelu kosmetologa (przeniesione do Sprzedaży)
+ *     - W panelu kosmetologa nowy przycisk "🛍 Sprzedaż produktów →" z preselect klienta
+ *   • W trybie kiosk ukryta sekcja "Otrzymaj zalecenia SMS/e-mail" (klient nie ma do niej dostępu)
+ *   • Opisy zgód wizerunku — pełne wyjaśnienie różnicy Dokumentacja vs Marketing SM (RODO)
+ *  Zmiany v1.2.5: aparat HTTPS, sync DELETE, ujednolicony handover, PDF czysty
+ *  Zmiany v1.2.4: pełny podgląd zgody, monit klienta, aparat w galerii, status zgód
+ *  Zmiany v1.2.3: PDF overlap, pre-fill zgód, kiosk PIN, sessionStorage view, picker katalogu
+ *  Zmiany v1.2.2: _syncedAt, wyszukiwarka klienta w zgodzie, soft-hide zabiegów
+ *  Zmiany v1.2.1: REPLICA IDENTITY, bulk-delete, recovery zdjęć
+ *  Zmiany v1.2.0: sync magazynu, picker DOB, filtr urodzin, lock podpisu
  * ============================================================ */
 
 "use strict";
 
-const CACHE_VERSION = "v1.2.5";
+const CACHE_VERSION = "v1.2.6";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------

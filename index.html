@@ -196,6 +196,7 @@ body.kiosk-mode #installBanner,
 /* FIX 3 v1.2.5: Ukrywamy w trybie kiosk również elementy nawigacyjne kosmetologa
    widoczne tylko podczas konfiguracji zgody (przed oddaniem tabletu klientowi). */
 body.kiosk-mode #draftBanner,
+body.kiosk-mode .kiosk-hide-recs,
 body.kiosk-mode #vConsent>.cd:first-child  /* sekcja Wybór zabiegu (Wyszukaj + dropdown) */
 {display:none!important}
 body.kiosk-mode .vw:not(#vConsent){display:none!important}
@@ -271,6 +272,7 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
 <button data-v="calendar">Kalendarz</button>
 <button data-v="menu">Menu</button>
 <button data-v="stock">📦 Magazyn</button>
+<button data-v="sales">🛍 Sprzedaż</button>
 <button data-v="stats">Statystyki</button>
 <button data-v="settings" style="border-color:var(--t2);color:var(--t2)">⚙</button>
 </div>
@@ -403,6 +405,39 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
 <input type="text" id="stockSrch" placeholder="🔍 Szukaj produktu..." oninput="renderStock()">
 </div>
 <div id="stockContent"></div>
+</div></div>
+
+<!-- ===== PANEL SPRZEDAŻY PRODUKTÓW (POS) v1.2.6 ===== -->
+<!-- Oddzielny od panelu zabiegowego — kosmetolog może sprzedawać produkty bez wizyty
+     lub po wizycie (przycisk → Sprzedaż w panelu kosmetologa). Każda transakcja zapisuje:
+     • osobne wpisy do stockMoves (qty<0, reason="sprzedaż", saleId=znacznik transakcji)
+     • automatyczne odjęcie ze stanu produktu (products.stock -= qty)
+     Historia per klient zaciąga się w jego profilu (sekcja "Historia zakupów"). -->
+<div id="vSales" class="vw">
+<div class="cd"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+🛍 Sprzedaż produktów
+<div class="brow" style="margin:0">
+<button class="b b1 bsm" onclick="renderSalesHistory()" title="Historia transakcji wszystkich klientów">📋 Historia</button>
+</div></div>
+<!-- KROK 1: wybór klienta -->
+<div class="cd" style="background:var(--bg2);margin-top:8px"><div class="ct">1️⃣ Wybierz klienta</div>
+<div class="fl"><label>Wyszukaj klienta z bazy <span style="font:300 9px var(--fb);color:var(--t2)">(lub sprzedaż bez przypisania)</span></label>
+<input type="text" id="salesClSrch" placeholder="🔍 Wpisz imię, nazwisko lub telefon..." oninput="searchClientForSales(this.value)" autocomplete="off">
+<div id="salesClResults" style="position:relative;max-height:180px;overflow-y:auto;display:none;background:var(--c);border:1px solid var(--bd);border-radius:var(--rs);margin-top:4px"></div>
+</div>
+<div id="salesPickedClient" style="display:none;background:var(--sb);border-left:3px solid var(--sc);padding:8px 10px;border-radius:var(--rs);margin-top:6px"></div>
+</div>
+<!-- KROK 2: wybór produktów -->
+<div class="cd" style="background:var(--bg2);margin-top:8px"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">2️⃣ Dodaj produkty <button class="b bs bsm" onclick="openSalesProductPicker()">➕ Dodaj produkt</button></div>
+<div id="salesCart" style="margin-top:6px;min-height:60px;font:300 11px var(--fb);color:var(--t2);padding:10px;border:1px dashed var(--bd);border-radius:var(--rs);background:var(--c);text-align:center">Brak produktów. Kliknij "➕ Dodaj produkt" aby dodać do koszyka.</div>
+<div id="salesTotal" style="display:none;font:700 14px var(--fb);margin-top:8px;text-align:right;color:var(--sc);padding:8px;background:var(--sb);border-radius:var(--rs)"></div>
+</div>
+<!-- KROK 3: zapis -->
+<div class="cd" style="background:var(--bg2);margin-top:8px"><div class="ct">3️⃣ Notatka i zapis (opcjonalna)</div>
+<div class="fl"><label>Notatka do transakcji</label><input type="text" id="salesNote" maxlength="120" placeholder="np. Pakiet pielęgnacja domowa po Hydra Booster" oninput="_salesCart.note=this.value"></div>
+<div class="brow" style="margin-top:8px"><button class="b bs" onclick="saveSale()" id="salesSaveBtn">💾 Zapisz transakcję</button>
+<button class="b b2" onclick="resetSalesPanel()">🔄 Wyczyść</button></div>
+</div>
 </div></div>
 
 <div id="vStats" class="vw">
@@ -1432,7 +1467,7 @@ document.addEventListener("DOMContentLoaded",()=>{
     if(document.body.classList.contains("kiosk-mode"))return; // nie przeszkadzaj klientowi w kiosku
     let lastView=null;
     try{lastView=sessionStorage.getItem("_lastView");}catch(_){}
-    const validViews=["consent","clients","detail","calendar","stats","settings","menu","stock"];
+    const validViews=["consent","clients","detail","calendar","stats","settings","menu","stock","sales"];
     // detail wymaga klienta — bez ID nie ma sensu wracać; zamiast tego idzie do clients
     if(lastView==="detail")lastView="clients";
     if(lastView&&validViews.includes(lastView)&&lastView!=="consent"){
@@ -1493,7 +1528,7 @@ function showV(v,opts){
   document.querySelectorAll(".nav button[data-v]").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
   const map={consent:"vConsent",clients:"vClients",detail:"vDetail",calendar:"vCal",stats:"vStats",settings:"vSettings",menu:"vMenu",stock:"vStock"};
   document.getElementById(map[v]||"vConsent").classList.add("on");
-  if(v==="clients")loadCl();if(v==="calendar")renderCal();if(v==="stats")renderStats();if(v==="menu")renderMenuList();if(v==="stock")renderStock();
+  if(v==="clients")loadCl();if(v==="calendar")renderCal();if(v==="stats")renderStats();if(v==="menu")renderMenuList();if(v==="stock")renderStock();if(v==="sales")initSalesPanel();
   updBackBtn();
 }
 
@@ -1871,9 +1906,22 @@ function renderForm(){
   h+='<span style="font:300 9px var(--fb);color:var(--t2);display:block;margin-top:6px">📨 Komunikaty otrzymasz na <strong>telefon (SMS)</strong> oraz <strong>e-mail</strong> podane powyżej. Zgoda dobrowolna — bez niej nadal możesz korzystać z usług, ale nie będziemy Cię informować o promocjach. Wycofanie zgody w każdej chwili: kosmetolog.maczynska@gmail.com lub SMS "STOP" na 503 672 015. Podstawa: art. 6 ust. 1 lit. a RODO + art. 172 Prawa Telekomunikacyjnego + art. 10 UŚUDE.</span>';
   h+='</span></label>';
   h+='</div>';
-  h+='<div class="cd" id="cdWiz"><div class="ct">Wizerunek (opcja)</div>';
+  h+='<div class="cd" id="cdWiz"><div class="ct">📸 Zgoda na wykorzystanie wizerunku (dobrowolne)</div>';
   h+='<div id="prevWizInfo" style="display:none"></div>';
-  h+='<label class="cc"><input type="checkbox" id="chkWD"><span>Dokumentacja</span></label><label class="cc"><input type="checkbox" id="chkWM"><span>Marketing</span></label></div>';
+  // FIX 4 v1.2.6: Jasne opisy obu rodzajów zgody na wizerunek — klient musi rozumieć
+  // czym różni się "dokumentacja gabinetowa" od "marketingu w social mediach". Wcześniej
+  // były tylko etykiety jednowyrazowe, niezgodnie z zasadą świadomej zgody (RODO).
+  h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkWD"><span><strong>📋 Dokumentacja zabiegowa (gabinet)</strong><br>'+
+     '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
+     'Zdjęcia <strong>przed/po zabiegu</strong> przechowywane w mojej karcie klienta — wewnątrz gabinetu, do oceny postępów, planowania kolejnych zabiegów i porównań.<br>'+
+     '<span style="color:var(--t2);font-size:9px">📍 Zdjęcia NIE są publikowane nigdzie poza gabinetem. Nie trafiają do social mediów ani materiałów promocyjnych.</span>'+
+     '</span></span></label>';
+  h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px"><input type="checkbox" id="chkWM"><span><strong>🎯 Marketing — social media i materiały promocyjne</strong><br>'+
+     '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
+     'Wyrażam zgodę na <strong>publikację moich zdjęć</strong> (przed/po zabiegu) na profilach gabinetu w mediach społecznościowych (Instagram, Facebook, TikTok), na stronie internetowej oraz w materiałach marketingowych (ulotki, reklamy).<br>'+
+     '<span style="color:var(--t2);font-size:9px">📍 Zdjęcia mogą być oglądane przez nieograniczoną liczbę osób w internecie. Wycofanie zgody w każdej chwili: kosmetolog.maczynska@gmail.com.</span>'+
+     '</span></span></label>';
+  h+='</div>';
   h+='</div>';
   h+='<div class="cd"><div class="ct">Podpis klienta <span class="rq">*</span></div><div class="sw"><canvas id="sc1"></canvas><div class="sp" id="sp1">✍ Podpisz palcem lub penem</div></div><div class="brow"><button class="b b2 bsm" onclick="SP.c1&&SP.c1.clear()">Wyczyść</button></div></div>';
   h+='<div class="vmsg" id="vMsg"></div>';
@@ -1885,7 +1933,9 @@ function renderForm(){
   h+='<div style="font:400 13px var(--fb);color:var(--t);margin-bottom:18px;line-height:1.5">Formularz zgody został pomyślnie zapisany.<br>Kosmetolog wykona zabieg zgodnie z Twoimi wskazaniami.</div>';
   // FIX 1: Tylko 2 akcje dla klienta (SMS, email) + jeden chroniony hasłem przycisk "Oddaj kosmetologowi".
   // Klient nie ma dostępu do panelu kosmetologa bez PIN-u — to ujednolica z trybem kiosk.
-  h+='<div style="background:var(--bg);border-radius:var(--rs);padding:14px;margin-bottom:14px"><div style="font:500 11px var(--fb);color:var(--t2);margin-bottom:8px">📨 Otrzymaj zalecenia pozabiegowe</div>';
+  // FIX 2 v1.2.6: Sekcja SMS/email tylko dla kosmetologa (nie kiosk) — klient może omyłkowo
+  // kliknąć i otworzyć aplikację SMS. Wysyłka zaleceń jest robotą kosmetologa po wzięciu tabletu.
+  h+='<div class="kiosk-hide-recs" style="background:var(--bg);border-radius:var(--rs);padding:14px;margin-bottom:14px"><div style="font:500 11px var(--fb);color:var(--t2);margin-bottom:8px">📨 Otrzymaj zalecenia pozabiegowe</div>';
   h+='<div class="brow" style="justify-content:center;margin:0">';
   h+='<button class="b bw bsm" onclick="sendRecsSMS()">📱 SMS</button>';
   h+='<button class="b b1 bsm" onclick="sendRecsEmail()">📧 E-mail</button>';
@@ -1897,17 +1947,19 @@ function renderForm(){
   h+='<div id="cosmoP" style="display:none"><div class="cd"><div class="ct">Panel kosmetologa — '+esc(cur.name)+'</div>';
   h+='<div class="fr"><div class="fl"><label>Data zabiegu</label><input type="date" id="fDt" value="'+new Date().toISOString().split("T")[0]+'"></div><div class="fl"><label>Parametry</label><input type="text" id="fPr"></div></div>';
   h+='<div class="fr f1"><div class="fl"><label>Uwagi</label><textarea id="fNo" rows="2" style="resize:vertical"></textarea></div></div>';
-  // ===== UPSELLING: Zalecane produkty do domu =====
-  // Sekcja pokazuje listę produktów retail z magazynu — kosmetolog klika co rekomenduje,
-  // produkt zostaje dopisany do rachunku (con.recommendedProducts) i zdjęty ze stanu przy zapisie.
-  h+='<div class="ct" style="margin-top:10px;font-size:11px;display:flex;justify-content:space-between;align-items:center">🛍 Zalecane produkty do domu <button class="b b1 bsm" onclick="openUpsellPicker()" style="margin:0">➕ Dobierz produkty</button></div>';
-  h+='<div id="upsellList" style="min-height:40px;border:1px dashed var(--bd);border-radius:var(--rs);padding:8px;font:300 10px var(--fb);color:var(--t2);background:var(--bg2)">Brak. Kliknij "➕ Dobierz produkty" aby polecić klientowi kosmetyki do pielęgnacji domowej.</div>';
-  h+='<div id="upsellTotal" style="display:none;font:600 12px var(--fb);margin-top:4px;text-align:right;color:var(--sc)"></div>';
+  // FIX 1 v1.2.6: Usunięto sekcję upsellingu produktów z panelu kosmetologa.
+  // Sprzedaż produktów jest teraz w osobnym widoku 🛍 Sprzedaż (data-v="sales") obok magazynu.
+  // Powód: kosmetolog nie zawsze ma czas na dobieranie produktów podczas wizyty,
+  // a wcześniej upselling był w środku panelu zabiegowego co spowalniało zapis dokumentacji.
+  // Wstawiamy ukryty placeholder żeby renderUpsellList (jeśli kiedyś coś próbuje rerenderować)
+  // nie wywaliło się na brakującym elemencie.
+  h+='<div id="upsellList" style="display:none"></div><div id="upsellTotal" style="display:none"></div>';
   h+='<div style="margin-top:10px;font:500 10px var(--fb);color:var(--t2);text-transform:uppercase;margin-bottom:4px">Zdjęcia</div>';
   h+='<div class="pg"><div class="pb" id="pb_before"><div style="display:flex;gap:4px;flex-direction:column;align-items:center"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'before\')" title="Aparat w aplikacji (zalecane)">📸 Aparat</button><button class="b b2 bsm" style="font-size:9px;padding:4px 8px" onclick="event.stopPropagation();fallbackFile(\'before\')" title="Wybierz z galerii">📁 Galeria</button></div><div class="pl">PRZED</div><input type="file" accept="image/*" onchange="photoUp(\'before\',this)"></div>';
   h+='<div class="pb" id="pb_after"><div style="display:flex;gap:4px;flex-direction:column;align-items:center"><button class="b b1 bsm" onclick="event.stopPropagation();openCam(\'after\')" title="Aparat w aplikacji (zalecane)">📸 Aparat</button><button class="b b2 bsm" style="font-size:9px;padding:4px 8px" onclick="event.stopPropagation();fallbackFile(\'after\')" title="Wybierz z galerii">📁 Galeria</button></div><div class="pl">PO</div><input type="file" accept="image/*" onchange="photoUp(\'after\',this)"></div></div>';
   h+='<div class="pcmp" id="pcmp"></div>';
-  h+='<div class="brow"><button class="b bs" onclick="cosmoSave()">💾 Zapisz dane zabiegowe</button></div></div>';
+  h+='<div class="brow"><button class="b bs" onclick="cosmoSave()">💾 Zapisz dane zabiegowe</button>'+
+     '<button class="b b1 bsm" onclick="closeMo();showV(\'sales\');setTimeout(()=>preselectSalesClient(savedCid),200)" title="Otwórz panel sprzedaży produktów dla tego klienta">🛍 Sprzedaż produktów →</button></div></div>';
   // STEP 3
   h+='<div id="step3" style="display:none"><div class="cd" style="text-align:center"><div class="ct">Co dalej?</div>';
   h+='<div style="display:flex;flex-direction:column;gap:8px;max-width:320px;margin:0 auto">';
@@ -4377,6 +4429,338 @@ async function saveStockItem(productId){
     supaUpsert("products",{...rec,id:newId}).catch(()=>{});
   }
   closeMo();toast("Zapisano ✓");markDirty();renderStock();
+}
+
+// ===== PANEL SPRZEDAŻY PRODUKTÓW (POS) v1.2.6 =====
+// Stan koszyka żyje w window._salesCart żeby przeżył przełączanie widoków bez F5.
+// Struktura: {clientId:int|null, items:[{productId, name, brand, retail_price, qty, size, kind}], note:""}
+window._salesCart = window._salesCart || {clientId:null, items:[], note:""};
+let _salesClSrchTimer=null;
+
+function initSalesPanel(){
+  // Render aktualnego stanu koszyka (mógł zostać z poprzedniej sesji)
+  renderSalesCart();
+  // Pre-fill notatki jeśli była
+  const noteInp=document.getElementById("salesNote");
+  if(noteInp&&_salesCart.note)noteInp.value=_salesCart.note;
+  // Pokaż wybranego klienta jeśli był
+  if(_salesCart.clientId)renderSalesPickedClient();
+}
+
+// Pomocnik wywołany z panelu zabiegowego — przekierowuje do Sales i pre-zaznacza klienta
+async function preselectSalesClient(cid){
+  if(!cid)return;
+  _salesCart.clientId=cid;
+  await renderSalesPickedClient();
+}
+
+function searchClientForSales(q){
+  clearTimeout(_salesClSrchTimer);
+  const box=document.getElementById("salesClResults");
+  if(!box)return;
+  q=(q||"").trim().toLowerCase();
+  if(q.length<2){box.style.display="none";box.innerHTML="";return;}
+  _salesClSrchTimer=setTimeout(async()=>{
+    const cls=await dbGetAll("clients");
+    const matched=cls.filter(c=>{
+      const n=(c.name||"").toLowerCase();
+      const p=(c.phone||"").replace(/\s/g,"").toLowerCase();
+      return n.includes(q)||p.includes(q.replace(/\s/g,""));
+    }).slice(0,8);
+    if(!matched.length){
+      box.innerHTML='<div style="padding:8px;font:400 11px var(--fb);color:var(--t2)">Brak wyników</div>';
+    }else{
+      box.innerHTML=matched.map(c=>'<div onclick="pickClientForSales('+c.id+')" style="padding:8px 10px;border-bottom:1px solid var(--bd);cursor:pointer;font:400 11px var(--fb)"><div style="font-weight:600">'+esc(c.name)+'</div><div style="font:300 9px var(--fb);color:var(--t2)">'+(c.phone?'📞 '+esc(c.phone):'')+'</div></div>').join("");
+    }
+    box.style.display="block";
+  },200);
+}
+
+async function pickClientForSales(cid){
+  _salesCart.clientId=cid;
+  await renderSalesPickedClient();
+  // Wyczyść wyszukiwarkę
+  const srch=document.getElementById("salesClSrch");if(srch)srch.value="";
+  const box=document.getElementById("salesClResults");if(box){box.style.display="none";box.innerHTML="";}
+}
+
+async function renderSalesPickedClient(){
+  const wrap=document.getElementById("salesPickedClient");
+  if(!wrap)return;
+  if(!_salesCart.clientId){wrap.style.display="none";return;}
+  const cls=await dbGetAll("clients");
+  const c=cls.find(x=>x.id===_salesCart.clientId);
+  if(!c){wrap.style.display="none";_salesCart.clientId=null;return;}
+  wrap.style.display="block";
+  wrap.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><div><div style="font:600 12px var(--fb)">✓ '+esc(c.name)+'</div><div style="font:300 10px var(--fb);color:var(--t2)">'+(c.phone||"")+(c.email?" · "+esc(c.email):"")+'</div></div><button class="b b2 bsm" onclick="_salesCart.clientId=null;renderSalesPickedClient()">✕ Zmień</button></div>';
+}
+
+async function openSalesProductPicker(){
+  // Pokaż picker produktów retail z magazynu (z wyszukiwarką + filtrem kategorii).
+  // Tylko produkty kind in ('retail','both') — to są te przeznaczone do sprzedaży.
+  const allProds=await dbGetAll("products");
+  const retailProds=allProds.filter(p=>p.kind==="retail"||p.kind==="both");
+  if(!retailProds.length){
+    toast("Brak produktów retail w magazynie. Dodaj produkty lub zmień ich rodzaj na 'sprzedaż'.");
+    return;
+  }
+  const cats=[...new Set(retailProds.map(p=>p.category||"Inne"))].sort();
+  const mc=document.getElementById("modC");
+  mc.style.maxWidth="95vw";mc.style.width="95vw";mc.style.maxHeight="90vh";
+  let h='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px"><h3 style="margin:0">🛍 Wybierz produkt do sprzedaży</h3><button class="b b2 bsm" onclick="closeMo()">✕</button></div>';
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">';
+  h+='<input type="text" id="spsSrch" placeholder="🔍 Szukaj nazwy / marki..." oninput="_renderSPSList()" style="flex:1;min-width:160px;padding:8px;border:1px solid var(--bd);border-radius:var(--rs)">';
+  h+='<select id="spsCat" onchange="_renderSPSList()" style="padding:8px;border:1px solid var(--bd);border-radius:var(--rs)"><option value="">Wszystkie kategorie</option>'+cats.map(c=>'<option value="'+esc(c)+'">'+esc(c)+'</option>').join("")+'</select>';
+  h+='</div>';
+  h+='<div id="spsList" style="max-height:60vh;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--rs);background:var(--bg2)"></div>';
+  h+='<div style="margin-top:8px;font:300 9px var(--fb);color:var(--t2)">💡 Po kliknięciu produkt jest dodawany do koszyka z domyślną ceną i ilością 1. Możesz edytować obie wartości w koszyku.</div>';
+  mc.innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+  // Cache produktów w window żeby _renderSPSList nie ładował z IDB za każdym keypressem
+  window._spsProducts=retailProds;
+  _renderSPSList();
+}
+
+function _renderSPSList(){
+  const list=document.getElementById("spsList");
+  if(!list||!window._spsProducts)return;
+  const q=(document.getElementById("spsSrch")?.value||"").toLowerCase().trim();
+  const cat=document.getElementById("spsCat")?.value||"";
+  let prods=window._spsProducts;
+  if(cat)prods=prods.filter(p=>(p.category||"Inne")===cat);
+  if(q)prods=prods.filter(p=>(p.name||"").toLowerCase().includes(q)||(p.brand||"").toLowerCase().includes(q));
+  // Ile sztuk już w koszyku (żeby UI pokazał disabled gdy stan==0 i nie ma w koszyku)
+  const inCart={};_salesCart.items.forEach(i=>{inCart[i.productId]=(inCart[i.productId]||0)+i.qty;});
+  if(!prods.length){
+    list.innerHTML='<div style="padding:20px;text-align:center;font:400 11px var(--fb);color:var(--t2)">Brak wyników</div>';
+    return;
+  }
+  let h="";let lastCat="";
+  prods.forEach(p=>{
+    const c=p.category||"Inne";
+    if(c!==lastCat){h+='<div style="background:var(--c);padding:6px 10px;font:600 10px var(--fb);color:var(--t);position:sticky;top:0;border-bottom:1px solid var(--bd)">'+esc(c)+'</div>';lastCat=c;}
+    const stock=p.stock||0;const cartQty=inCart[p.id]||0;const remaining=stock-cartQty;
+    const lowStock=remaining<=0&&stock!=null;
+    h+='<div style="padding:8px 10px;border-bottom:1px solid var(--bd);display:flex;gap:10px;align-items:center;background:var(--c)">';
+    h+='<div style="flex:1;min-width:0">';
+    h+='<div style="font:600 11px var(--fb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.name)+'</div>';
+    h+='<div style="font:300 9px var(--fb);color:var(--t2)">'+esc(p.brand||"")+(p.size?' · '+esc(p.size):'')+(p.retail_price?' · <strong style="color:var(--sc)">'+(+p.retail_price).toFixed(2)+' zł</strong>':' · <span style="color:var(--wn)">brak ceny</span>')+(stock!=null?' · '+(remaining>0?'na stanie '+remaining+' szt':'<span style="color:var(--dn)">brak na stanie</span>'):'')+'</div>';
+    h+='</div>';
+    h+='<button class="b bs bsm" onclick="addToSalesCart('+p.id+')" '+(lowStock?'disabled style="opacity:.4"':'')+'>➕ Dodaj</button>';
+    h+='</div>';
+  });
+  list.innerHTML=h;
+}
+
+async function addToSalesCart(pid){
+  const allProds=await dbGetAll("products");
+  const p=allProds.find(x=>x.id===pid);
+  if(!p){toast("Produkt nie istnieje");return;}
+  // Czy już jest w koszyku → zwiększ ilość
+  const existing=_salesCart.items.find(i=>i.productId===pid);
+  if(existing){
+    existing.qty++;
+  }else{
+    _salesCart.items.push({productId:pid,name:p.name,brand:p.brand,retail_price:+p.retail_price||0,qty:1,size:p.size||"",kind:p.kind||"both"});
+  }
+  // Odśwież widok koszyka i listy (żeby zaktualizować "na stanie X" w pickerze)
+  renderSalesCart();
+  if(document.getElementById("spsList"))_renderSPSList();
+  toast("✓ Dodano do koszyka");
+}
+
+function renderSalesCart(){
+  const cart=document.getElementById("salesCart");
+  const totalEl=document.getElementById("salesTotal");
+  if(!cart)return;
+  if(!_salesCart.items.length){
+    cart.innerHTML='Brak produktów. Kliknij "➕ Dodaj produkt" aby dodać do koszyka.';
+    cart.style.color="var(--t2)";cart.style.background="var(--c)";
+    if(totalEl)totalEl.style.display="none";
+    return;
+  }
+  cart.style.color="";cart.style.background="";cart.style.padding="0";cart.style.border="none";
+  let h='<div style="background:var(--c);border:1px solid var(--bd);border-radius:var(--rs);overflow:hidden">';
+  let total=0;
+  _salesCart.items.forEach((it,idx)=>{
+    const lineTotal=(it.retail_price||0)*it.qty;
+    total+=lineTotal;
+    h+='<div style="padding:10px;border-bottom:1px solid var(--bd);display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+    h+='<div style="flex:1;min-width:140px"><div style="font:600 11px var(--fb)">'+esc(it.name)+'</div><div style="font:300 9px var(--fb);color:var(--t2)">'+esc(it.brand||"")+(it.size?' · '+esc(it.size):'')+'</div></div>';
+    // Ilość — input number z przyciskami +/-
+    h+='<div style="display:flex;align-items:center;gap:4px"><button class="b b2 bsm" style="padding:4px 8px;min-width:0" onclick="changeSalesQty('+idx+',-1)">−</button>';
+    h+='<input type="number" min="1" step="1" value="'+it.qty+'" onchange="setSalesQty('+idx+',this.value)" style="width:50px;text-align:center;padding:4px;border:1px solid var(--bd);border-radius:var(--rs)">';
+    h+='<button class="b b2 bsm" style="padding:4px 8px;min-width:0" onclick="changeSalesQty('+idx+',1)">+</button></div>';
+    // Cena edytowalna
+    h+='<div style="display:flex;align-items:center;gap:4px"><input type="number" min="0" step="0.01" value="'+it.retail_price+'" onchange="setSalesPrice('+idx+',this.value)" style="width:70px;text-align:right;padding:4px;border:1px solid var(--bd);border-radius:var(--rs)">zł</div>';
+    h+='<div style="font:600 12px var(--fb);min-width:70px;text-align:right;color:var(--sc)">'+lineTotal.toFixed(2)+' zł</div>';
+    h+='<button class="b bd bsm" style="padding:4px 8px;min-width:0" onclick="removeSalesItem('+idx+')" title="Usuń z koszyka">🗑</button>';
+    h+='</div>';
+  });
+  h+='</div>';
+  cart.innerHTML=h;
+  if(totalEl){totalEl.style.display="block";totalEl.textContent="SUMA: "+total.toFixed(2)+" zł ("+_salesCart.items.length+" pozycji, "+_salesCart.items.reduce((s,i)=>s+i.qty,0)+" szt.)";}
+}
+
+function changeSalesQty(idx,delta){
+  const it=_salesCart.items[idx];if(!it)return;
+  it.qty=Math.max(1,(+it.qty||0)+delta);
+  renderSalesCart();
+}
+function setSalesQty(idx,val){
+  const it=_salesCart.items[idx];if(!it)return;
+  const v=Math.max(1,Math.floor(+val||1));
+  it.qty=v;
+  renderSalesCart();
+}
+function setSalesPrice(idx,val){
+  const it=_salesCart.items[idx];if(!it)return;
+  it.retail_price=Math.max(0,+val||0);
+  renderSalesCart();
+}
+function removeSalesItem(idx){
+  _salesCart.items.splice(idx,1);
+  renderSalesCart();
+}
+
+function resetSalesPanel(){
+  if((_salesCart.items.length||_salesCart.clientId)&&!confirm("Wyczyścić panel sprzedaży? Niezapisana transakcja zostanie utracona."))return;
+  _salesCart={clientId:null,items:[],note:""};
+  document.getElementById("salesNote").value="";
+  document.getElementById("salesPickedClient").style.display="none";
+  renderSalesCart();
+  toast("✓ Panel wyczyszczony");
+}
+
+async function saveSale(){
+  if(!_salesCart.items.length){toast("⚠ Koszyk jest pusty");return;}
+  const noteInp=document.getElementById("salesNote");
+  _salesCart.note=(noteInp?.value||"").trim();
+  const total=_salesCart.items.reduce((s,it)=>s+(it.retail_price||0)*it.qty,0);
+  // Czytelne podsumowanie do potwierdzenia
+  const cls=await dbGetAll("clients");
+  const cl=_salesCart.clientId?cls.find(x=>x.id===_salesCart.clientId):null;
+  const summary="ZAPIS SPRZEDAŻY:\n\n"+
+    "Klient: "+(cl?cl.name:"BEZ PRZYPISANIA")+"\n"+
+    "Produkty:\n"+_salesCart.items.map(it=>"• "+it.name+" — "+it.qty+" szt × "+it.retail_price.toFixed(2)+" = "+(it.retail_price*it.qty).toFixed(2)+" zł").join("\n")+
+    "\n\nSUMA: "+total.toFixed(2)+" zł\n\nKontynuować?";
+  if(!confirm(summary))return;
+  const btn=document.getElementById("salesSaveBtn");if(btn)btn.disabled=true;
+  try{
+    // Wspólny saleId (timestamp) żeby móc grupować pozycje jednej transakcji
+    const saleId=Date.now();
+    const tsIso=new Date().toISOString();
+    // Dla każdej pozycji: stockMove (qty<0) + dekrement products.stock
+    for(const it of _salesCart.items){
+      // Stock move
+      const moveRec={
+        productId:it.productId,
+        qty:-Math.abs(it.qty),
+        reason:"sprzedaż"+(_salesCart.note?" — "+_salesCart.note:""),
+        appointmentId:null,
+        consentId:null,
+        saleId:saleId,
+        clientId:_salesCart.clientId||null,
+        unit_price:it.retail_price,
+        createdAt:tsIso
+      };
+      const moveId=await dbAdd("stockMoves",moveRec);
+      // Sync do chmury (fire-and-forget)
+      if(typeof supaUpsert==="function")supaUpsert("stock_moves",{...moveRec,id:moveId});
+      // Dekrement stanu produktu
+      const allProds=await dbGetAll("products");
+      const p=allProds.find(x=>x.id===it.productId);
+      if(p&&p.stock!=null){
+        p.stock=Math.max(0,(+p.stock||0)-it.qty);
+        p.updatedAt=tsIso;
+        await dbPut("products",p);
+        if(typeof supaUpsert==="function")supaUpsert("products",p);
+      }
+    }
+    // Reset koszyka
+    _salesCart={clientId:null,items:[],note:""};
+    if(noteInp)noteInp.value="";
+    document.getElementById("salesPickedClient").style.display="none";
+    renderSalesCart();
+    toast("✅ Sprzedaż zapisana — suma: "+total.toFixed(2)+" zł");
+    markDirty();
+  }catch(e){
+    console.error("saveSale:",e);
+    toast("❌ Błąd zapisu: "+e.message);
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+
+// Historia transakcji wszystkich klientów — modal z grupowaniem po saleId
+async function renderSalesHistory(){
+  const moves=await dbGetAll("stockMoves");
+  const sales=moves.filter(m=>m.qty<0&&m.saleId&&/^sprzedaż/i.test(m.reason||""));
+  if(!sales.length){
+    const mc=document.getElementById("modC");
+    mc.innerHTML='<h3>📋 Historia sprzedaży</h3><div class="db" style="text-align:center">Brak transakcji sprzedaży.</div><div class="brow"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+    document.getElementById("modal").classList.add("on");
+    return;
+  }
+  // Grupuj po saleId
+  const grouped={};
+  sales.forEach(s=>{if(!grouped[s.saleId])grouped[s.saleId]=[];grouped[s.saleId].push(s);});
+  const sortedKeys=Object.keys(grouped).sort((a,b)=>+b-+a); // najnowsze pierwsze
+  const cls=await dbGetAll("clients");
+  const clsMap=Object.fromEntries(cls.map(c=>[c.id,c]));
+  const allProds=await dbGetAll("products");
+  const prMap=Object.fromEntries(allProds.map(p=>[p.id,p]));
+  const mc=document.getElementById("modC");
+  mc.style.maxWidth="95vw";mc.style.width="95vw";mc.style.maxHeight="90vh";
+  let h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📋 Historia sprzedaży ('+sortedKeys.length+' transakcji)</h3><button class="b b2 bsm" onclick="closeMo()">✕</button></div>';
+  h+='<div style="max-height:75vh;overflow-y:auto">';
+  let grandTotal=0;
+  sortedKeys.forEach(sid=>{
+    const items=grouped[sid];
+    const total=items.reduce((s,it)=>s+(+it.unit_price||0)*Math.abs(it.qty),0);
+    grandTotal+=total;
+    const date=items[0].createdAt||new Date(+sid).toISOString();
+    const clientName=items[0].clientId?(clsMap[items[0].clientId]?.name||"(nieznany)"):"BEZ PRZYPISANIA";
+    h+='<div style="background:var(--c);border:1px solid var(--bd);border-radius:var(--rs);padding:10px;margin-bottom:6px">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px"><div><div style="font:600 12px var(--fb)">'+esc(clientName)+'</div><div style="font:300 9px var(--fb);color:var(--t2)">'+esc(date.replace("T"," ").substring(0,16))+'</div></div><div style="font:700 14px var(--fb);color:var(--sc)">'+total.toFixed(2)+' zł</div></div>';
+    h+='<div style="font:300 10px var(--fb);color:var(--t)">';
+    items.forEach(it=>{
+      const p=prMap[it.productId];
+      const name=p?p.name:"(usunięty produkt #"+it.productId+")";
+      h+='<div style="padding:2px 0">• '+esc(name)+' — '+Math.abs(it.qty)+'×'+(+it.unit_price||0).toFixed(2)+' = '+(Math.abs(it.qty)*(+it.unit_price||0)).toFixed(2)+' zł</div>';
+    });
+    h+='</div>';
+    if(items[0].reason&&items[0].reason!=="sprzedaż")h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:4px;font-style:italic">📝 '+esc(items[0].reason.replace(/^sprzedaż\s*—?\s*/i,""))+'</div>';
+    h+='<div class="brow" style="margin-top:6px;justify-content:flex-end"><button class="b bd bsm" onclick="deleteSaleTransaction('+sid+')" title="Usuń całą transakcję (przywraca stan magazynu)">🗑 Usuń transakcję</button></div>';
+    h+='</div>';
+  });
+  h+='</div>';
+  h+='<div style="margin-top:10px;padding:10px;background:var(--sb);border-radius:var(--rs);text-align:right;font:700 14px var(--fb);color:var(--sc)">SUMA WSZYSTKICH TRANSAKCJI: '+grandTotal.toFixed(2)+' zł</div>';
+  h+='<div class="brow" style="margin-top:10px"><button class="b b2" onclick="closeMo()">Zamknij</button></div>';
+  mc.innerHTML=h;
+  document.getElementById("modal").classList.add("on");
+}
+
+async function deleteSaleTransaction(saleId){
+  const moves=await dbGetAll("stockMoves");
+  const items=moves.filter(m=>m.saleId===saleId);
+  if(!items.length){toast("Transakcja nie istnieje");return;}
+  if(!confirm("Usunąć całą transakcję ("+items.length+" pozycji)? Stan magazynu zostanie przywrócony."))return;
+  // Przywróć stan każdego produktu
+  const allProds=await dbGetAll("products");
+  for(const m of items){
+    const p=allProds.find(x=>x.id===m.productId);
+    if(p&&p.stock!=null){
+      p.stock=(+p.stock||0)+Math.abs(m.qty);
+      p.updatedAt=new Date().toISOString();
+      await dbPut("products",p);
+      if(typeof supaUpsert==="function")supaUpsert("products",p);
+    }
+    await dbDel("stockMoves",m.id);
+    if(typeof supaDelete==="function")supaDelete("stock_moves",m.id);
+  }
+  toast("✅ Transakcja usunięta — przywrócono stan magazynu");
+  renderSalesHistory();
 }
 
 async function deleteStockItem(productId){
