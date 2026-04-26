@@ -192,7 +192,12 @@ body.kiosk-mode .hdr,
 body.kiosk-mode #syncBanner,
 body.kiosk-mode #syncBadge,
 body.kiosk-mode #backBtn,
-body.kiosk-mode #installBanner{display:none!important}
+body.kiosk-mode #installBanner,
+/* FIX 3 v1.2.5: Ukrywamy w trybie kiosk również elementy nawigacyjne kosmetologa
+   widoczne tylko podczas konfiguracji zgody (przed oddaniem tabletu klientowi). */
+body.kiosk-mode #draftBanner,
+body.kiosk-mode #vConsent>.cd:first-child  /* sekcja Wybór zabiegu (Wyszukaj + dropdown) */
+{display:none!important}
 body.kiosk-mode .vw:not(#vConsent){display:none!important}
 body.kiosk-mode .vw#vConsent{display:block!important}
 body.kiosk-mode .wrap{padding-top:10px}
@@ -1598,7 +1603,57 @@ clear(){this.ctx.clearRect(0,0,this.cv.width,this.cv.height);this.has=false;if(t
 img(){return this.has?this.cv.toDataURL("image/png"):null;}}
 
 // ===== CAMERA & PHOTOS =====
-async function openCam(type){try{const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280}}});const mc=document.getElementById("modC");mc.innerHTML='<h3>Zrób zdjęcie</h3><div style="position:relative;border-radius:var(--r);overflow:hidden;background:#000"><video id="camV" autoplay playsinline style="width:100%;display:block"></video><canvas id="camCv" style="display:none"></canvas></div><div class="brow"><button class="b bs" onclick="snapCam(\''+type+'\')">📸 Zrób zdjęcie</button><button class="b b2" onclick="stopCam();closeMo()">Anuluj</button></div>';document.getElementById("modal").classList.add("on");document.getElementById("camV").srcObject=stream;}catch(err){fallbackFile(type);}}
+async function openCam(type){
+  // FIX 4 v1.2.5: Defensywny check przed pokazaniem aparatu in-app.
+  // Problemy które wystąpiły:
+  //  - HTTPS niezbędny dla getUserMedia (chrome://flags). Na localhost/file:// błąd nie zwraca pustego stream'u
+  //  - Niektóre tablety zwracają stream ale bez aktywnych tracks (ikona przekreślonej kamery)
+  //  - Permission denied zwraca NotAllowedError ale dopiero przy próbie play
+  // Strategia: spróbuj otworzyć, sprawdź czy stream ma aktywne video tracks. Jeśli nie — od razu fallback.
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    toast("⚠ Aparat niedostępny w tej przeglądarce — używam galerii");
+    fallbackFile(type);return;
+  }
+  // HTTPS check — w niektórych przeglądarkach getUserMedia działa tylko w secure context
+  if(location.protocol!=="https:"&&location.hostname!=="localhost"&&location.hostname!=="127.0.0.1"){
+    toast("⚠ Aparat wymaga HTTPS — używam galerii");
+    fallbackFile(type);return;
+  }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280}}});
+    // Sprawdź czy stream faktycznie ma aktywne video tracks
+    const tracks=stream.getVideoTracks();
+    if(!tracks.length||tracks[0].readyState!=="live"){
+      tracks.forEach(t=>t.stop());
+      toast("⚠ Kamera nie zwróciła obrazu — używam galerii");
+      fallbackFile(type);return;
+    }
+    const mc=document.getElementById("modC");
+    mc.innerHTML='<h3>Zrób zdjęcie</h3><div style="position:relative;border-radius:var(--r);overflow:hidden;background:#000"><video id="camV" autoplay playsinline muted style="width:100%;display:block;min-height:280px"></video><canvas id="camCv" style="display:none"></canvas></div><div class="brow"><button class="b bs" onclick="snapCam(\''+type+'\')">📸 Zrób zdjęcie</button><button class="b b1 bsm" onclick="stopCam();closeMo();fallbackFile(\''+type+'\')">📁 Użyj galerii zamiast tego</button><button class="b b2" onclick="stopCam();closeMo()">Anuluj</button></div>';
+    document.getElementById("modal").classList.add("on");
+    const v=document.getElementById("camV");
+    v.srcObject=stream;
+    // Czekamy na pierwszą klatkę video — jeśli nie nadejdzie w 3s, traktuj jako fail
+    let firstFrame=false;
+    v.addEventListener("playing",()=>{firstFrame=true;},{once:true});
+    setTimeout(()=>{
+      if(!firstFrame){
+        console.warn("Camera: no first frame in 3s, falling back");
+        stopCam();closeMo();
+        toast("⚠ Aparat się nie uruchomił — używam galerii");
+        fallbackFile(type);
+      }
+    },3000);
+  }catch(err){
+    console.warn("openCam error:",err.name,err.message);
+    let msg="⚠ Aparat niedostępny";
+    if(err.name==="NotAllowedError")msg="⚠ Brak uprawnień do aparatu — sprawdź ustawienia przeglądarki";
+    else if(err.name==="NotFoundError")msg="⚠ Brak kamery";
+    else if(err.name==="NotReadableError")msg="⚠ Aparat zajęty przez inną aplikację";
+    toast(msg+" — używam galerii");
+    fallbackFile(type);
+  }
+}
 function snapCam(type){const v=document.getElementById("camV"),c=document.getElementById("camCv");c.width=v.videoWidth;c.height=v.videoHeight;c.getContext("2d").drawImage(v,0,0);photos[type]=c.toDataURL("image/jpeg",.85);stopCam();closeMo();drawPhoto(type);updCmp();}
 function stopCam(){const v=document.getElementById("camV");if(v&&v.srcObject){v.srcObject.getTracks().forEach(t=>t.stop());}}
 function fallbackFile(type){const inp=document.querySelector("#pb_"+type+" input[type=file]");if(inp)inp.click();}
@@ -1824,15 +1879,19 @@ function renderForm(){
   h+='<div class="vmsg" id="vMsg"></div>';
   h+='<div class="cd no-print" id="step1Btns"><button class="b bs bbl" id="btnSv" onclick="clientSave()">✅ Potwierdzam i zapisuję zgodę</button> <button class="b b2 bsm kiosk-hide-inside" onclick="kioskEnter()" title="Ukryj nawigację i podaj tablet klientowi" style="margin-left:8px">🖥 Podaj tablet klientowi</button><div class="legal" id="lStamp" style="display:none"></div></div>';
   // HANDOVER
-  h+='<div id="handover" style="display:none"><div class="cd" style="text-align:center;padding:30px 16px;background:linear-gradient(135deg,var(--g3),var(--bg2))">';
-  h+='<div style="font-size:40px;margin-bottom:10px">🔄</div>';
-  h+='<div style="font:700 18px var(--fd);margin-bottom:4px">PRZEKAŻ TABLET KOSMETOLOGOWI</div>';
-  h+='<div style="font:400 11px var(--fb);color:var(--t2);margin-bottom:14px">Zgoda zapisana. Możesz wysłać zalecenia pozabiegowe klientowi:</div>';
-  h+='<div class="brow" style="justify-content:center;margin-bottom:14px">';
-  h+='<button class="b bw" onclick="sendRecsSMS()">📱 Wyślij SMS z zaleceniami</button>';
-  h+='<button class="b b1" onclick="sendRecsEmail()">📧 Wyślij e-mail z zaleceniami</button>';
-  h+='</div>';
-  h+='<button class="b b1" style="padding:12px 28px;font-size:13px" onclick="showStep2()">Przejdź do panelu kosmetologa →</button>';
+  h+='<div id="handover" style="display:none"><div class="cd" style="text-align:center;padding:36px 16px;background:linear-gradient(135deg,var(--g3),var(--bg2))">';
+  h+='<div style="font-size:64px;margin-bottom:14px">🌟</div>';
+  h+='<div style="font:700 22px var(--fd);color:var(--sc);margin-bottom:6px">Dziękujemy!</div>';
+  h+='<div style="font:400 13px var(--fb);color:var(--t);margin-bottom:18px;line-height:1.5">Formularz zgody został pomyślnie zapisany.<br>Kosmetolog wykona zabieg zgodnie z Twoimi wskazaniami.</div>';
+  // FIX 1: Tylko 2 akcje dla klienta (SMS, email) + jeden chroniony hasłem przycisk "Oddaj kosmetologowi".
+  // Klient nie ma dostępu do panelu kosmetologa bez PIN-u — to ujednolica z trybem kiosk.
+  h+='<div style="background:var(--bg);border-radius:var(--rs);padding:14px;margin-bottom:14px"><div style="font:500 11px var(--fb);color:var(--t2);margin-bottom:8px">📨 Otrzymaj zalecenia pozabiegowe</div>';
+  h+='<div class="brow" style="justify-content:center;margin:0">';
+  h+='<button class="b bw bsm" onclick="sendRecsSMS()">📱 SMS</button>';
+  h+='<button class="b b1 bsm" onclick="sendRecsEmail()">📧 E-mail</button>';
+  h+='</div></div>';
+  h+='<button class="b b1" style="padding:14px 28px;font-size:13px;width:100%;max-width:340px" onclick="_handoverToCosmo()">🔓 Oddaj tablet kosmetologowi</button>';
+  h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">Wymagany PIN dostępu kosmetologa</div>';
   h+='</div></div>';
   // STEP 2
   h+='<div id="cosmoP" style="display:none"><div class="cd"><div class="ct">Panel kosmetologa — '+esc(cur.name)+'</div>';
@@ -1905,9 +1964,17 @@ async function pickClientForConsent(cid){
   if(c.dob)dobPickerSetValue("fD",c.dob);
   const srch=document.getElementById("fClSrch");if(srch)srch.value=c.name+(c.phone?" ("+c.phone+")":"");
   const box=document.getElementById("fClResults");if(box){box.style.display="none";box.innerHTML="";}
-  // FIX 2: pre-fill zgód marketingowych/wizerunku jeśli klient już je wcześniej wyrażał
+  // FIX 2 v1.2.5: pre-fill zgód marketingowych/wizerunku jeśli klient już je wcześniej wyrażał
   await applyExistingConsents(cid);
   toast("✓ Dane klienta wstawione");
+  // FIX 8 v1.2.5: po wyborze klienta — automatycznie pokaż dialog wyboru trybu (kiosk/kosmetolog).
+  // Bez tego kosmetolog musiał ponownie zmieniać dropdown żeby wywołać showKioskChoice.
+  // 200ms żeby toast się pokazał i applyExistingConsents skończyło.
+  setTimeout(()=>{
+    if(typeof showKioskChoice==="function"&&!document.body.classList.contains("kiosk-mode")){
+      showKioskChoice();
+    }
+  },200);
 }
 
 // Sprawdza historyczne zgody klienta i przygotowuje formularz tak, żeby NIE pytać
@@ -2063,10 +2130,9 @@ async function clientSave(){
   document.getElementById("handover").scrollIntoView({behavior:"smooth"});
   toast("Zgoda zapisana ✓");
   setTimeout(()=>autoPDF("klient"),500);
-  // Tryb kiosk: pokaż ekran "Dziękujemy" i auto-exit po 10 sekundach
-  if(document.body.classList.contains("kiosk-mode")){
-    setTimeout(kioskShowThankYou,800);
-  }
+  // FIX 1: handover JEST ekranem podziękowania — nie pokazujemy drugiego (kioskShowThankYou).
+  // W trybie kiosk handover wyświetla tylko 2 akcje (SMS, email) + zamknięty PIN-em "Oddaj kosmetologowi".
+  // To ujednolica flow kiosk vs niekiosk: oba lądują na handoverze.
 }
 
 // Ekran podziękowania dla trybu kiosku — zastępuje widok formularza po podpisie
@@ -2160,7 +2226,9 @@ function _showCosmoActionMenu(){
 function _focusCosmoPanel(){
   const handover=document.getElementById("handover");
   const cosmoP=document.getElementById("cosmoP");
-  if(handover)handover.style.display="block";
+  // FIX 6: ukrywamy handover gdy kosmetolog wszedł do panelu — tablet już nie jest dla klienta.
+  // Wcześniej handover zostawał widoczny z przyciskiem "Oddaj tablet kosmetologowi" co dezorientowało.
+  if(handover)handover.style.display="none";
   if(cosmoP){cosmoP.style.display="block";cosmoP.scrollIntoView({behavior:"smooth"});}
   setTimeout(()=>toast("📋 Uzupełnij zdjęcia przed/po, parametry i notatki",4000),300);
 }
@@ -2216,6 +2284,31 @@ function sendRecsEmail(){
   window.open("mailto:"+email+"?subject="+encodeURIComponent("Zalecenia pozabiegowe — "+cur.name)+"&body="+encodeURIComponent(body));
 }
 function showStep2(){document.getElementById("handover").style.display="none";document.getElementById("cosmoP").style.display="block";document.getElementById("cosmoP").scrollIntoView({behavior:"smooth"});window._upsellPicked=[];renderUpsellList();}
+
+// FIX 1: Ujednolicony handover-to-cosmetologist — wymaga PIN-u (jeśli ustawiony).
+// Po sukcesie wyłącza tryb kiosk + pokazuje cosmoP (panel kosmetologa).
+// Robi DOKŁADNIE TO SAMO co PIN-prompt w trybie kiosku → spójność.
+function _handoverToCosmo(){
+  const savedPin=localStorage.getItem("pin");
+  if(savedPin){
+    const inp=prompt("🔓 Wprowadź PIN kosmetologa:");
+    if(inp===null)return;
+    if(inp!==savedPin){toast("❌ Nieprawidłowy PIN");return;}
+  }
+  // Wyjście z trybu kiosku jeśli aktywny
+  if(document.body.classList.contains("kiosk-mode")){
+    document.body.classList.remove("kiosk-mode");
+    if(typeof _kioskBlockKeys==="function")window.removeEventListener("keydown",_kioskBlockKeys,true);
+  }
+  // Anuluj timer auto-powrotu jeśli był
+  if(window._kioskCountdownIv){clearInterval(window._kioskCountdownIv);window._kioskCountdownIv=null;}
+  // Pokaż panel kosmetologa zamiast handover-u
+  showStep2();
+  // Po krótkim opóźnieniu pokaż menu z dodatkowymi opcjami (pełny podgląd zgody, kalendarz, etc.)
+  setTimeout(()=>{
+    if(typeof _showCosmoActionMenu==="function")_showCosmoActionMenu();
+  },300);
+}
 
 // ===== UPSELLING W ZAKOŃCZENIU ZABIEGU =====
 // _upsellPicked: [{productId, name, retail_price, qty, size, notes}]
@@ -2379,7 +2472,22 @@ function _sendUpsellEmail(cl,picked,con){
   body+="Zapraszamy na kolejną wizytę!\n\nGabinet Kosmetologiczny Magda Mączyńska\nul. Okrąg 46, 87-600 Lipno\nTel. 503 672 015";
   window.open("mailto:"+cl.email+"?subject="+encodeURIComponent("Polecane kosmetyki po zabiegu — "+(cur?.name||""))+"&body="+encodeURIComponent(body));
 }
-function newForm(){document.getElementById("tSel").value="";renderForm();window.scrollTo({top:0,behavior:"smooth"});}
+function newForm(){
+  // FIX 6 v1.2.5: Pełny reset stanu zanim renderForm.
+  // Bez tego "Nowa zgoda dla kolejnego klienta" przepisywała cur/savedCid ze starych zmiennych
+  // i kosmetolog widział poprzedni handover/cosmoP nakładający się na nowy formularz.
+  savedCid=null;savedConId=null;
+  photos={before:null,after:null};
+  _consentSelectedClientId=null;
+  // Ukryj sekcje operacyjne ze starej zgody
+  ["handover","cosmoP","step3"].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display="none";});
+  // Wyczyść pola formularza
+  document.getElementById("tSel").value="";
+  const tSrch=document.getElementById("tSrch");if(tSrch)tSrch.value="";
+  renderForm();
+  window.scrollTo({top:0,behavior:"smooth"});
+  toast("📝 Nowa zgoda — wybierz zabieg");
+}
 function bookFromStep3(){showV("calendar");}
 
 function gatherData(){
@@ -2406,9 +2514,17 @@ async function autoPDF(label){
   //  - PNG zamiast JPEG dla zgód (są tekstem, kompresja PNG nie ucina detali)
   try{
     document.querySelectorAll(".no-print").forEach(e=>e.style.display="none");
+    // FIX 2 v1.2.5: Z PDF wykluczamy elementy operacyjne aplikacji — klient w PDFie ma widzieć
+    // TYLKO formalną zgodę (od imienia do podpisu), bez sekcji "Przekaż tablet kosmetologowi",
+    // "Panel kosmetologa", upsellingu produktów, przycisków SMS/email/zaleceń.
+    const opSections=["handover","cosmoP","step3"].map(id=>document.getElementById(id)).filter(Boolean);
+    const opSavedDisplay=opSections.map(el=>el.style.display);
+    opSections.forEach(el=>{el.style.display="none";});
     const target=document.getElementById("vConsent");
     const realWidth=Math.max(target.scrollWidth,840);
     const c=await html2canvas(target,{scale:2,useCORS:true,backgroundColor:"#FAFAF7",windowWidth:realWidth,scrollY:-window.scrollY});
+    // Przywróć widoczność sekcji operacyjnych
+    opSections.forEach((el,i)=>{el.style.display=opSavedDisplay[i];});
     const{jsPDF}=window.jspdf;
     const PW=210,PH=297,MARGIN=12,IW=PW-2*MARGIN;     // A4 portret w mm
     const ih=(c.height*IW)/c.width;                    // wysokość pełnego obrazu w mm
@@ -6490,19 +6606,11 @@ async function globalFullSync(showProgress=true){
   const msg=document.getElementById("syncBannerMsg");
   if(banner){banner.className="sync-banner on syncing";if(msg)msg.textContent="🔄 Synchronizowanie...";}
   try{
-    // === PUSH: wyślij lokalne rekordy (idempotentny upsert) ===
-    const [clients,cons,appts,prods,moves]=await Promise.all([
-      dbGetAll("clients"),dbGetAll("consents"),dbGetAll("appointments"),
-      dbGetAll("products"),dbGetAll("stockMoves")
-    ]);
-    await Promise.all([
-      ...clients.map(r=>supaUpsert("clients",r).catch(()=>null)),
-      ...cons.map(r=>supaUpsert("consents",r).catch(()=>null)),
-      ...appts.map(r=>supaUpsert("appointments",r).catch(()=>null)),
-      ...prods.map(r=>supaUpsert("products",r).catch(()=>null)),
-      ...moves.map(r=>supaUpsert("stock_moves",r).catch(()=>null))
-    ]);
-    // === PULL: pobierz rekordy z chmury których brakuje lokalnie ===
+    // FIX 5 v1.2.5: ZMIANA KOLEJNOŚCI — najpierw PULL+DELETE, potem PUSH.
+    // Wcześniej: PUSH → PULL. Bug: gdy A usunął produkt 123, B miał go lokalnie i przy
+    // PUSH upsertował go z powrotem do chmury. Produkty "wracały" po usunięciu.
+    // Teraz: PULL pobiera aktualny stan chmury, wykrywa brakujące = usunięte na innym urządzeniu,
+    // usuwa lokalnie. Dopiero potem PUSH — i lokalna baza jest już spójna z chmurą.
     const[{data:clCloud},{data:coCloud},{data:apCloud},{data:prCloud},{data:mvCloud}]=await Promise.all([
       supa.from("clients").select("local_id,name,phone,email,address,dob,pesel,importSource,marketingConsent").eq("user_id",supaUser.id),
       supa.from("consents").select("local_id,clientId,treatmentId,treatmentName,date,rodo,marketing").eq("user_id",supaUser.id),
@@ -6527,20 +6635,13 @@ async function globalFullSync(showProgress=true){
       cloudPrIds.add(r.local_id);
       const local=localPrMap[r.local_id];
       const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;
-      // Każdy produkt który JEST w chmurze → oznacz lokalnie jako _syncedAt.
-      // To naprawia DELETE-sync dla starych instalacji (przed v1.2.1) gdzie
-      // produkty zostały zaimportowane przed wprowadzeniem flagi i nie miały
-      // możliwości być oznaczone jako "kiedyś w chmurze".
       rec._syncedAt=local?._syncedAt||new Date().toISOString();
       if(!local){
         await dbAdd("products",rec).catch(()=>{});pulled++;
       }else if((r.updatedAt||"")>(local.updatedAt||"")){
-        // Cloud jest nowszy — zaktualizuj lokalny (zachowaj niezsynchronizowane pola)
         Object.assign(local,rec);
         await dbPut("products",local).catch(()=>{});pulled++;
       }else if(!local._syncedAt){
-        // Lokalny nowszy lub równy, ale brak flagi _syncedAt — uzupełnij ją milcząco
-        // żeby globalFullSync DELETE działał na tym produkcie od następnego sync.
         local._syncedAt=new Date().toISOString();
         await dbPut("products",local).catch(()=>{});
       }
@@ -6557,6 +6658,20 @@ async function globalFullSync(showProgress=true){
     }
     if(removed)console.log("globalFullSync: usunięto",removed,"produktów które zostały usunięte na innym urządzeniu");
     for(const r of(mvCloud||[])){if(r.local_id&&!localMvIds.has(r.local_id)){const rec={...r,id:r.local_id};delete rec.user_id;delete rec.local_id;await dbAdd("stockMoves",rec).catch(()=>{});pulled++;}}
+
+    // === PUSH: wyślij lokalne rekordy DOPIERO PO synchronizacji DELETE-ów ===
+    // Ważne: musimy odczytać IDB ponownie (po dbDel powyżej), bo localProds jest stale.
+    const [clientsAfter,consAfter,apptsAfter,prodsAfter,movesAfter]=await Promise.all([
+      dbGetAll("clients"),dbGetAll("consents"),dbGetAll("appointments"),
+      dbGetAll("products"),dbGetAll("stockMoves")
+    ]);
+    await Promise.all([
+      ...clientsAfter.map(r=>supaUpsert("clients",r).catch(()=>null)),
+      ...consAfter.map(r=>supaUpsert("consents",r).catch(()=>null)),
+      ...apptsAfter.map(r=>supaUpsert("appointments",r).catch(()=>null)),
+      ...prodsAfter.map(r=>supaUpsert("products",r).catch(()=>null)),
+      ...movesAfter.map(r=>supaUpsert("stock_moves",r).catch(()=>null))
+    ]);
     _lastSyncTs=Date.now();
     localStorage.setItem("mm_lastSync",_lastSyncTs);
     if(banner){

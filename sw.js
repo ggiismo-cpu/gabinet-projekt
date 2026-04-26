@@ -1,35 +1,28 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.4  |  2026-04-25
- *  Zmiany v1.2.4 (UX i prawne):
- *   • Pełny podgląd zgody — viewConsent pokazuje WSZYSTKIE sekcje (przeciwwskazania,
- *     zalecenia, zakazy, higiena, możliwe reakcje, oświadczenie klienta) z szablonu T
- *   • PDF download/preview ekspanduje modal do pełnej wysokości — koniec ucinania
- *   • Monit "Najpierw wybierz klienta" przed przejściem do panelu kosmetologa
- *   • Aparat foto w galerii klienta (z opcją "zrób kolejne")
- *   • Status zgód w profilu klienta (RODO/marketing/wizerunek) — kosmetolog widzi
- *     na pierwszy rzut oka czy może wysyłać SMS-y promocyjne
- *   • Mass SMS — filtruje klientów wg zgody marketingowej (art. 172 PT, art. 10 UŚUDE)
- *  Zmiany v1.2.3:
- *   • PDF zgody — paginacja overlap 8mm + numerowanie stron
- *   • Pre-fill historycznych zgód marketingowych
- *   • Tryb kiosk: PIN-protected unlock + menu akcji
- *   • Po reload przywróć ostatni widok (sessionStorage)
- *   • Selektywny picker produktów z katalogu
- *  Zmiany v1.2.2:
- *   • _syncedAt auto-mark, pierwotny panel po reload
- *   • Wyszukiwarka klienta + przycisk "Nowy klient" w zgodzie
- *   • Soft-hide wbudowanych zabiegów
- *   • Wizyta w kalendarzu: profil klienta + lista wizyt + odwołanie serii
- *  Zmiany v1.2.1:
- *   • REPLICA IDENTITY FULL, bulk-delete, recovery zdjęć, pełnoekranowy podgląd zgody
- *  Zmiany v1.2.0:
- *   • Sync magazynu z Realtime, picker DOB, filtr urodzin, lock podpisu, galeria
+ *  Wersja: 1.2.5  |  2026-04-26
+ *  Zmiany v1.2.5 (UX hotfix po teście):
+ *   • Aparat — defensywne sprawdzanie HTTPS + uprawnień + fallback do galerii
+ *   • Usuwanie produktów — naprawione "rezurekcje" (PULL przed PUSH w globalFullSync)
+ *   • Po zapisie zgody: ujednolicony ekran handover (klient widzi tylko podziękowanie + 2 akcje)
+ *   • Przycisk "Oddaj tablet kosmetologowi" chroniony PIN-em
+ *   • PDF nie zawiera już "Przekaż tablet kosmetologowi" ani panelu kosmetologa
+ *   • Strefa klienta (kiosk-mode): ukryte "Wyszukaj zabieg", "Znaleziono szkic"
+ *   • Po wyborze klienta z bazy automatycznie dialog "Tablet dla klienta / Wypełniam ja"
+ *   • "Nowa zgoda dla kolejnego klienta" — pełny reset stanu
+ *   • "Dodaj zdjęcia, parametry" — ukrywa handover żeby panel był widoczny
+ *  Zmiany v1.2.4:
+ *   • Pełny podgląd zgody (wszystkie sekcje T)
+ *   • PDF download/preview ekspanduje modal
+ *   • Monit "Najpierw wybierz klienta"
+ *   • Aparat foto w galerii klienta
+ *   • Status zgód RODO/marketing/wizerunek w profilu klienta
+ *   • Mass SMS filtruje wg zgody marketingowej
  * ============================================================ */
 
 "use strict";
 
-const CACHE_VERSION = "v1.2.4";
+const CACHE_VERSION = "v1.2.5";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
