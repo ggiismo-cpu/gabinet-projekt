@@ -41,7 +41,7 @@
 .bcall{background:#2196F3;color:#fff}.bcall:hover{background:#1976D2}
 /* Calendar */
 .cal-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.cal-hd h3{font:600 15px var(--fd)}.cal-nav{display:flex;gap:4px}
-.cal-grid{display:grid;grid-template-columns:60px repeat(6,1fr);gap:1px;background:var(--bd);border-radius:var(--r);overflow:hidden;font:400 10px var(--fb)}
+.cal-grid{display:grid;grid-template-columns:60px repeat(7,1fr);gap:1px;background:var(--bd);border-radius:var(--r);overflow:hidden;font:400 10px var(--fb)}
 .cal-hdr{background:var(--t);color:#fff;padding:6px 4px;text-align:center;font:600 10px var(--fb)}.cal-time{background:var(--bg2);padding:4px;text-align:right;font:500 9px var(--fb);color:var(--t2)}
 .cal-slot{background:#fff;padding:3px;min-height:28px;cursor:pointer;transition:.15s;position:relative}.cal-slot:hover{background:var(--g3)}.cal-slot.off{background:var(--bg2);cursor:default}.cal-slot.off:hover{background:var(--bg2)}.cal-slot.booked{background:var(--g3);cursor:default}
 .cal-ev{background:var(--g);color:#fff;padding:2px 4px;border-radius:3px;font:500 8px var(--fb);line-height:1.3;overflow:hidden}
@@ -275,6 +275,7 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
 <button data-v="sales">🛍 Sprzedaż</button>
 <button data-v="stats">Statystyki</button>
 <button data-v="settings" style="border-color:var(--t2);color:var(--t2)">⚙</button>
+<button onclick="openSmartSearch()" style="border-color:var(--ac);color:var(--ac);font:600 12px var(--fb)" title="Globalna wyszukiwarka (Ctrl+K)">🔍</button>
 </div>
 <!-- Baner synchronizacji — pojawia się gdy są niezapisane/niezasynchronizowane zmiany -->
 <div id="syncBanner" class="sync-banner dirty">
@@ -284,11 +285,11 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
     <button class="b bsm" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);padding:4px 8px;min-width:0" onclick="hideSyncBanner()">✕</button>
   </div>
 </div>
-<div class="hdr"><h1>Gabinet Kosmetologiczny Magda Mączyńska</h1><p>ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.10</span></p></div>
+<div class="hdr"><h1>Gabinet Kosmetologiczny Magda Mączyńska</h1><p>ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.12</span></p></div>
 <div class="wrap">
 
 <div id="vConsent" class="vw on">
-<!-- FIX v1.2.10: Banner sugerujący otwarcie zgody dla klienta z dzisiejszej wizyty.
+<!-- FIX v1.2.12: Banner sugerujący otwarcie zgody dla klienta z dzisiejszej wizyty.
      Renderowany przez _renderTodayApptBanner po starcie aplikacji + przy renderForm. -->
 <div id="todayApptBanner" style="display:none"></div>
 <div class="cd"><div class="ct">Wybór zabiegu</div>
@@ -410,14 +411,14 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
 <div id="stockContent"></div>
 </div></div>
 
-<!-- ===== PANEL SPRZEDAŻY PRODUKTÓW (POS) v1.2.10 ===== -->
+<!-- ===== PANEL SPRZEDAŻY PRODUKTÓW (POS) v1.2.12 ===== -->
 <!-- ⚠ Niezależny mechanizm display: wymuszone przez inline style w showV. -->
 <!-- Oddzielny od panelu zabiegowego — kosmetolog może sprzedawać produkty bez wizyty
      lub po wizycie (przycisk → Sprzedaż w panelu kosmetologa). Każda transakcja zapisuje:
      • osobne wpisy do stockMoves (qty<0, reason="sprzedaż", saleId=znacznik transakcji)
      • automatyczne odjęcie ze stanu produktu (products.stock -= qty)
      Historia per klient zaciąga się w jego profilu (sekcja "Historia zakupów"). -->
-<div id="vSales" class="vw" data-version="v1.2.10">
+<div id="vSales" class="vw" data-version="v1.2.12">
 <div class="cd" style="background:linear-gradient(135deg,var(--sb),var(--bg2));border-left:4px solid var(--sc)">
   <div class="ct" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:0">
     <span>🛍 Sprzedaż produktów</span>
@@ -1012,7 +1013,7 @@ async function supaDelete(table,localId){
   try{await supa.from(table).delete().eq('local_id',localId).eq('user_id',supaUser.id);}catch(e){console.warn(e);}
 }
 
-// FIX v1.2.10 (zadanie 5): Permanentne usunięcie z chmury z tombstone w localStorage.
+// FIX v1.2.12 (zadanie 5): Permanentne usunięcie z chmury z tombstone w localStorage.
 // Problem: po dbDel+supaDelete inne urządzenie mogło sync-iem upsertować z powrotem
 // (race condition). Rozwiązanie: dodajemy ID do listy tombstone w localStorage; 
 // globalFullSync sprawdza tę listę i wykluczy te rekordy z PUSH (nawet jeśli ktoś wciąż je ma lokalnie).
@@ -1524,13 +1525,13 @@ document.addEventListener("DOMContentLoaded",()=>{
     }
     if(typeof _viewStack!=="undefined")_viewStack.length=0; // po reload nie ma "wstecz"
     if(typeof updBackBtn==="function")updBackBtn();
-    // FIX v1.2.10 (zadanie 1): Auto-load — pokaż banner z sugestią najbliższej wizyty dziś.
+    // FIX v1.2.12 (zadanie 1): Auto-load — pokaż banner z sugestią najbliższej wizyty dziś.
     // Kosmetolog jednym klikiem otwiera zgodę z pre-fillem.
     setTimeout(_renderTodayApptBanner,300);
   },80);
 });
 
-// FIX v1.2.10: Renderuje baner "Dziś o HH:MM masz wizytę X — otwórz zgodę" na górze widoku Nowa zgoda.
+// FIX v1.2.12: Renderuje baner "Dziś o HH:MM masz wizytę X — otwórz zgodę" na górze widoku Nowa zgoda.
 // Pokazuje się tylko gdy: jesteśmy w vConsent, jest klient z wizytą dziś, klient nie został jeszcze wpisany.
 async function _renderTodayApptBanner(){
   const banner=document.getElementById("todayApptBanner");
@@ -1600,13 +1601,22 @@ function showV(v,opts){
   document.querySelectorAll(".nav button[data-v]").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
   // FIX v1.2.8: brakujące mapowanie sales:"vSales" — bez tego klik "Sprzedaż" pokazywał vConsent
   // (fallback na vConsent gdy map[v]===undefined). Klasyczny jednolinijkowy bug w hashmapie.
-  // FIX v1.2.10: wymuszam display:block przez inline style — eliminuje wszelkie wątpliwości
+  // FIX v1.2.12: wymuszam display:block przez inline style — eliminuje wszelkie wątpliwości
   // związane z CSS specificity / cache. Jeśli klasa .on by zawiodła (np. nadpisana w innym CSS),
   // inline style ma najwyższy priorytet i widok i tak się pokaże.
   const map={consent:"vConsent",clients:"vClients",detail:"vDetail",calendar:"vCal",stats:"vStats",settings:"vSettings",menu:"vMenu",stock:"vStock",sales:"vSales"};
   const targetEl=document.getElementById(map[v]||"vConsent");
   if(targetEl){targetEl.classList.add("on");targetEl.style.display="block";}
-  if(v==="clients")loadCl();if(v==="calendar")renderCal();if(v==="stats")renderStats();if(v==="menu")renderMenuList();if(v==="stock")renderStock();if(v==="sales")initSalesPanel();
+  if(v==="clients")loadCl();
+  // FIX v1.2.12: Wejście w kalendarz zawsze resetuje calDate do dziś — kosmetolog częściej chce
+  // zobaczyć "co teraz" niż wracać do tygodnia w którym zostawił ostatnio. Plus auto-scroll
+  // do aktualnej godziny żeby od razu widzieć aktualnie trwającą wizytę.
+  if(v==="calendar"){
+    calDate=new Date();
+    renderCal();
+    setTimeout(_scrollCalToNow,200);
+  }
+  if(v==="stats")renderStats();if(v==="menu")renderMenuList();if(v==="stock")renderStock();if(v==="sales")initSalesPanel();
   updBackBtn();
 }
 
@@ -2013,7 +2023,8 @@ function renderForm(){
   // Klient nie ma dostępu do panelu kosmetologa bez PIN-u — to ujednolica z trybem kiosk.
   // FIX 2 v1.2.6: Sekcja SMS/email tylko dla kosmetologa (nie kiosk) — klient może omyłkowo
   // kliknąć i otworzyć aplikację SMS. Wysyłka zaleceń jest robotą kosmetologa po wzięciu tabletu.
-  h+='<div class="kiosk-hide-recs" style="background:var(--bg);border-radius:var(--rs);padding:14px;margin-bottom:14px"><div style="font:500 11px var(--fb);color:var(--t2);margin-bottom:8px">📨 Otrzymaj zalecenia pozabiegowe</div>';
+  // FIX v1.2.12: id="handoverRecsBox" + klasa kiosk-hide-recs — runtime ukrywa dla admin consent.
+  h+='<div id="handoverRecsBox" class="kiosk-hide-recs" style="background:var(--bg);border-radius:var(--rs);padding:14px;margin-bottom:14px"><div style="font:500 11px var(--fb);color:var(--t2);margin-bottom:8px">📨 Otrzymaj zalecenia pozabiegowe</div>';
   h+='<div class="brow" style="justify-content:center;margin:0">';
   h+='<button class="b bw bsm" onclick="sendRecsSMS()">📱 SMS</button>';
   h+='<button class="b b1 bsm" onclick="sendRecsEmail()">📧 E-mail</button>';
@@ -2039,7 +2050,8 @@ function renderForm(){
   // FIX 3 v1.2.7: Sekcja SMS/email z zaleceniami w panelu kosmetologa (po wzięciu tabletu od klienta).
   // Wcześniej SMS/email było tylko w handover (widoczne TYLKO klientowi), a w trybie kiosk klient
   // tej sekcji nie widział wcale → wysyłka zaleceń znikała z flow. Teraz: kosmetolog ma to w cosmoP.
-  h+='<div style="margin-top:12px;padding:12px;background:var(--bg2);border-left:3px solid var(--ac);border-radius:var(--rs)">';
+  // FIX v1.2.12: id="cosmoRecsBox" pozwala ukryć sekcję runtime dla zgód RODO/foto/marketing.
+  h+='<div id="cosmoRecsBox" style="margin-top:12px;padding:12px;background:var(--bg2);border-left:3px solid var(--ac);border-radius:var(--rs)">';
   h+='<div style="font:600 11px var(--fb);color:var(--t);margin-bottom:6px">📨 Wyślij klientowi zalecenia pozabiegowe</div>';
   h+='<div style="font:300 9px var(--fb);color:var(--t2);margin-bottom:8px">Zalecenia z templatu zabiegu (NIE zawierają cen ani ilości produktów). Treść wstępnie wypełniona — możesz edytować w aplikacji SMS/Mail.</div>';
   h+='<div class="brow" style="margin:0"><button class="b bw bsm" onclick="sendRecsSMS()">📱 SMS z zaleceniami</button>';
@@ -2267,8 +2279,29 @@ async function clientSave(){
       }
     }
   }
-  document.getElementById("handover").style.display="block";
-  document.getElementById("handover").scrollIntoView({behavior:"smooth"});
+  // FIX v1.2.12 (2): RODO / wizerunek / marketing — pomiń ekran handover.
+  // Te zgody nie mają zaleceń pozabiegowych ani sensu dla "Otrzymaj zalecenia SMS/email".
+  // Zamiast pokazywać klientowi pusty/mylący handover, idziemy od razu do podziękowania
+  // + przeszkalamy do menu kosmetologa (z PIN jeśli kiosk).
+  const isAdminConsent=cur&&_isAdministrativeConsent(cur.id);
+  if(isAdminConsent){
+    // Pokażemy uproszczony ekran podziękowania bez sekcji SMS/email zaleceń
+    const handover=document.getElementById("handover");
+    if(handover){
+      handover.style.display="block";
+      handover.innerHTML='<div class="cd" style="text-align:center;padding:36px 16px;background:linear-gradient(135deg,var(--g3),var(--bg2))">'+
+        '<div style="font-size:64px;margin-bottom:14px">✅</div>'+
+        '<div style="font:700 22px var(--fd);color:var(--sc);margin-bottom:6px">Zgoda podpisana</div>'+
+        '<div style="font:400 13px var(--fb);color:var(--t);margin-bottom:18px;line-height:1.5">Dziękujemy! Twoja zgoda została pomyślnie zapisana.<br><span style="font:300 11px var(--fb);color:var(--t2)">Ten formularz jest dokumentem administracyjnym — nie wymaga zaleceń pozabiegowych.</span></div>'+
+        '<button class="b b1" style="padding:14px 28px;font-size:13px;width:100%;max-width:340px" onclick="_handoverToCosmo()">🔓 Oddaj tablet kosmetologowi</button>'+
+        '<div style="font:300 9px var(--fb);color:var(--t2);margin-top:6px">Wymagany PIN dostępu kosmetologa</div>'+
+        '</div>';
+      handover.scrollIntoView({behavior:"smooth"});
+    }
+  }else{
+    document.getElementById("handover").style.display="block";
+    document.getElementById("handover").scrollIntoView({behavior:"smooth"});
+  }
   toast("Zgoda zapisana ✓");
   setTimeout(()=>autoPDF("klient"),500);
   // FIX 1: handover JEST ekranem podziękowania — nie pokazujemy drugiego (kioskShowThankYou).
@@ -2364,7 +2397,7 @@ function _showCosmoActionMenu(){
 
 // Pokaż handover (legalStamp) i panel kosmetologa (cosmoP) — wraca do widoku zgody
 // w stanie "po zapisie", gdzie kosmetolog może uzupełnić zdjęcia i parametry.
-// FIX v1.2.10: Otwiera formularz zgody z pre-fillowanymi danymi klienta i zabiegiem z wizyty.
+// FIX v1.2.12: Otwiera formularz zgody z pre-fillowanymi danymi klienta i zabiegiem z wizyty.
 // Logika:
 //   1. Pobierz wizytę → znajdź klienta i nazwę zabiegu
 //   2. Znajdź odpowiadający templateId w FM (mapowanie nazwa zabiegu → consentId)
@@ -2405,7 +2438,7 @@ async function openConsentForAppt(aId){
   const srch=document.getElementById("fClSrch");if(srch)srch.value=cl.name+(cl.phone?" ("+cl.phone+")":"");
   // Pre-fillu zgody marketingowe/wizerunek z historii (ukrycie sekcji już wyrażonych)
   await applyExistingConsents(cl.id);
-  // FIX v1.2.10 (zadanie 4): Pre-fillu checkboxy z ostatniej zgody klienta na TEN SAM zabieg.
+  // FIX v1.2.12 (zadanie 4): Pre-fillu checkboxy z ostatniej zgody klienta na TEN SAM zabieg.
   // Klient tylko sprawdza zmiany i podpisuje ponownie — nie musi wszystkiego klikać od nowa.
   const filledFromHistory=await applyPreviousConsentChecks(cl.id,tmplId);
   if(filledFromHistory){
@@ -2419,7 +2452,7 @@ async function openConsentForAppt(aId){
   },300);
 }
 
-// FIX v1.2.10 (zadanie 4): Pre-fill checkboxów TAK/NIE z ostatniej zgody klienta na ten sam zabieg.
+// FIX v1.2.12 (zadanie 4): Pre-fill checkboxów TAK/NIE z ostatniej zgody klienta na ten sam zabieg.
 // Zwraca liczbę pre-fillowanych odpowiedzi lub 0 jeśli nie było historii.
 async function applyPreviousConsentChecks(clientId,treatmentId){
   if(!clientId||!treatmentId)return 0;
@@ -2460,7 +2493,7 @@ async function applyPreviousConsentChecks(clientId,treatmentId){
   return filled;
 }
 
-// FIX v1.2.10 (zadanie 1): Auto-load danych klienta z dzisiejszej wizyty.
+// FIX v1.2.12 (zadanie 1): Auto-load danych klienta z dzisiejszej wizyty.
 // Wywoływane przy ładowaniu vConsent (jeśli kosmetolog odświeży aplikację rano i ma wizytę
 // klienta o 11:00, formularz może już mieć jego dane wpisane — przy wybraniu zabiegu).
 async function checkTodaysAppointment(){
@@ -2482,6 +2515,13 @@ function _focusCosmoPanel(){
   // Wcześniej handover zostawał widoczny z przyciskiem "Oddaj tablet kosmetologowi" co dezorientowało.
   if(handover)handover.style.display="none";
   if(cosmoP){cosmoP.style.display="block";cosmoP.scrollIntoView({behavior:"smooth"});}
+  // FIX v1.2.12 (3): Ukrywamy sekcję wysyłki zaleceń jeśli aktualny formularz to RODO/foto/marketing.
+  // Te zgody nie mają zaleceń pozabiegowych — sekcja byłaby pusta i myląca.
+  const cosmoRecsBox=document.getElementById("cosmoRecsBox");
+  if(cosmoRecsBox){
+    const isAdmin=cur&&_isAdministrativeConsent(cur.id);
+    cosmoRecsBox.style.display=isAdmin?"none":"";
+  }
   setTimeout(()=>toast("📋 Uzupełnij zdjęcia przed/po, parametry i notatki",4000),300);
 }
 
@@ -2515,24 +2555,83 @@ function kioskReturnToCosmo(){
   _kioskUnlockForCosmo(true);
 }
 
+// FIX v1.2.12 (1B): Naprawa wysyłki zaleceń — wcześniej slice(0,3)/(0,2) gubiło większość treści.
+// Teraz wszystkie zalecenia, ale z mądrym przycinaniem dla SMS (limit 480 znaków = 3 SMS).
+// Email zawsze pełna lista — brak limitu długości.
+// Dodatkowo: walidacja czy zabieg ma zalecenia w ogóle. RODO/foto/marketing nie mają i nie powinny.
+function _treatmentHasRecommendations(treatment){
+  return !!(treatment&&((treatment.recommendations_after&&treatment.recommendations_after.length)||(treatment.forbidden_after&&treatment.forbidden_after.length)));
+}
+function _isAdministrativeConsent(treatmentId){
+  // Zgody administracyjne (nie zabiegowe) — RODO, marketing, foto/wizerunek.
+  // Nazwy ID zgodne z templatami w T (np. zgoda_rodo, zgoda_foto, zgoda_marketing).
+  if(!treatmentId)return false;
+  const id=String(treatmentId).toLowerCase();
+  return id.includes("rodo")||id.includes("foto")||id.includes("marketing")||id.includes("wizerunek");
+}
+
 function sendRecsSMS(){
-  if(!cur)return;
+  if(!cur){toast("⚠ Najpierw wybierz zabieg");return;}
+  // FIX v1.2.12 (2): RODO/foto/marketing nie mają zaleceń pozabiegowych
+  if(_isAdministrativeConsent(cur.id)||!_treatmentHasRecommendations(cur)){
+    toast("ℹ️ Ten formularz nie ma zaleceń pozabiegowych do wysłania");
+    return;
+  }
   const phone=(document.getElementById("fP")?.value||"").trim(),name=(document.getElementById("fN")?.value||"").trim();
   if(!phone){toast("Brak numeru telefonu");return;}
-  let txt="Dzien dobry "+name.split(" ")[0]+", zalecenia po zabiegu "+cur.name+": ";
-  if(cur.recommendations_after)txt+=cur.recommendations_after.slice(0,3).join(". ")+". ";
-  if(cur.forbidden_after&&cur.forbidden_after.length)txt+="ZAKAZ: "+cur.forbidden_after.slice(0,2).join(". ")+". ";
-  txt+="Kontakt: 503672015 Gabinet Magda Maczynska";
+  const fn=name.split(" ")[0]||"Kliencie";
+  // Konstruuj tekst SMS-a z pełną listą zaleceń. SMS nie obsługuje formatowania,
+  // więc używamy znaku "·" zamiast bullet points (mieści się w GSM-7 nie wymagając Unicode).
+  let txt="Dzien dobry "+fn+"! Zalecenia po zabiegu \""+cur.name+"\":\n";
+  if(cur.recommendations_after&&cur.recommendations_after.length){
+    cur.recommendations_after.forEach(r=>{txt+="• "+r+"\n";});
+  }
+  if(cur.forbidden_after&&cur.forbidden_after.length){
+    txt+="\nNie wolno:\n";
+    cur.forbidden_after.forEach(r=>{txt+="• "+r+"\n";});
+  }
+  txt+="\nKontakt: 503 672 015\nGabinet Magda Maczynska";
+  // SMS limit: 480 znaków = 3 SMS-ki sklejone (160 znaków każdy w GSM-7).
+  // Jeśli przekraczamy, Android/iOS sklei automatycznie ale ostrzeżmy kosmetologa.
+  if(txt.length>480){
+    if(!confirm("⚠ Treść SMS-a ma "+txt.length+" znaków (>"+Math.ceil(txt.length/160)+" SMS-ek). Może to zwiększyć koszt wysyłki. Wysłać?\n\n💡 Tip: e-mail nie ma limitu i lepiej nadaje się do długich zaleceń.")){
+      return;
+    }
+  }
   window.open("sms:"+phone+"?body="+encodeURIComponent(txt));
 }
+
 function sendRecsEmail(){
-  if(!cur)return;
+  if(!cur){toast("⚠ Najpierw wybierz zabieg");return;}
+  if(_isAdministrativeConsent(cur.id)||!_treatmentHasRecommendations(cur)){
+    toast("ℹ️ Ten formularz nie ma zaleceń pozabiegowych do wysłania");
+    return;
+  }
   const email=(document.getElementById("fE")?.value||"").trim(),name=(document.getElementById("fN")?.value||"").trim();
   if(!email){toast("Brak adresu e-mail");return;}
-  let body="Dzień dobry "+name.split(" ")[0]+",\n\nDziękujemy za wizytę! Zalecenia po zabiegu "+cur.name+":\n\n";
-  if(cur.recommendations_after)cur.recommendations_after.forEach(r=>{body+="• "+r+"\n";});
-  if(cur.forbidden_after&&cur.forbidden_after.length){body+="\nBezwzględnie zakazane:\n";cur.forbidden_after.forEach(r=>{body+="• "+r+"\n";});}
-  body+="\nKontakt: 503 672 015\nGabinet Kosmetologiczny Magda Mączyńska\nul. Okrąg 46, 87-600 Lipno";
+  const fn=name.split(" ")[0]||"Kliencie";
+  let body="Dzień dobry "+fn+",\n\nDziękujemy za wizytę w naszym Gabinecie. Poniżej pełna lista zaleceń po zabiegu \""+cur.name+"\":\n\n";
+  if(cur.recommendations_after&&cur.recommendations_after.length){
+    body+="✅ ZALECENIA POZABIEGOWE:\n";
+    cur.recommendations_after.forEach(r=>{body+="• "+r+"\n";});
+    body+="\n";
+  }
+  if(cur.forbidden_after&&cur.forbidden_after.length){
+    body+="🚫 BEZWZGLĘDNIE ZAKAZANE:\n";
+    cur.forbidden_after.forEach(r=>{body+="• "+r+"\n";});
+    body+="\n";
+  }
+  if(cur.hygiene_after&&cur.hygiene_after.length){
+    body+="🧼 HIGIENA POZABIEGOWA:\n";
+    cur.hygiene_after.forEach(r=>{body+="• "+r+"\n";});
+    body+="\n";
+  }
+  if(cur.possible_reactions&&cur.possible_reactions.length){
+    body+="ℹ️ MOŻLIWE REAKCJE (są normalne, ustępują same):\n";
+    cur.possible_reactions.forEach(r=>{body+="• "+r+"\n";});
+    body+="\n";
+  }
+  body+="W razie pytań lub niepokojących objawów prosimy o pilny kontakt:\n📞 503 672 015\n📧 kosmetolog.maczynska@gmail.com\n\nPozdrawiamy,\nGabinet Kosmetologiczny Magda Mączyńska\nul. Okrąg 46, 87-600 Lipno";
   window.open("mailto:"+email+"?subject="+encodeURIComponent("Zalecenia pozabiegowe — "+cur.name)+"&body="+encodeURIComponent(body));
 }
 function showStep2(){document.getElementById("handover").style.display="none";document.getElementById("cosmoP").style.display="block";document.getElementById("cosmoP").scrollIntoView({behavior:"smooth"});window._upsellPicked=[];renderUpsellList();}
@@ -2855,8 +2954,11 @@ async function renderCal(){
 }
 
 async function _renderCalWeek(appts,cls,consByClient){
-  const ws=weekStart(calDate);const days=[];for(let i=0;i<6;i++){const d=new Date(ws);d.setDate(d.getDate()+i);days.push(d);}
-  document.getElementById("calTitle").textContent=ws.toLocaleDateString("pl-PL",{day:"numeric",month:"short"})+" – "+days[5].toLocaleDateString("pl-PL",{day:"numeric",month:"short",year:"numeric"});
+  // FIX v1.2.12: Tydzień obejmuje 7 dni (poniedziałek → niedziela). Wcześniej i<6 ucinało niedzielę,
+  // co powodowało rozbieżność z tytułem ("27 kwi – 2 maj" zamiast "27 kwi – 3 maj") i myliło kosmetologa.
+  // Niedziela ma HRS[0]=null więc jej sloty są "off" (zamknięte) — ale jest widoczna jako kolumna.
+  const ws=weekStart(calDate);const days=[];for(let i=0;i<7;i++){const d=new Date(ws);d.setDate(d.getDate()+i);days.push(d);}
+  document.getElementById("calTitle").textContent=ws.toLocaleDateString("pl-PL",{day:"numeric",month:"short"})+" – "+days[6].toLocaleDateString("pl-PL",{day:"numeric",month:"short",year:"numeric"});
   let g='<div class="cal-grid"><div class="cal-hdr"></div>';
   days.forEach(d=>{
     const isToday=d.toISOString().substring(0,10)===new Date().toISOString().substring(0,10);
@@ -2902,6 +3004,38 @@ async function _renderCalWeek(appts,cls,consByClient){
   const existing=document.querySelectorAll("#calLegend");
   if(existing.length>1)existing[0].remove();
   suggestNext(appts);
+}
+
+// FIX v1.2.12 (auto-scroll): Po renderowaniu tygodnia auto-scrolluje do aktualnej godziny,
+// żeby kosmetolog nie musiał ręcznie scrollować przy każdym wejściu. Plus znajduje aktualny
+// slot (pierwsza komórka z czasem dzisiaj+teraz) i robi smooth-scroll do niej.
+function _scrollCalToNow(){
+  if(_calView!=="week")return;
+  const now=new Date();
+  const todayIso=now.toISOString().substring(0,10);
+  // Tylko jeśli aktualnie wyświetlany tydzień zawiera dziś
+  const ws=weekStart(calDate);
+  const we=new Date(ws);we.setDate(we.getDate()+6);
+  if(now<ws||now>we)return; // przeglądamy inny tydzień — nie ingerujemy
+  // Znajdź najbliższy time-label do aktualnej godziny (zaokrąglone do 15 min wstecz)
+  const h=now.getHours();
+  let m=Math.floor(now.getMinutes()/15)*15;
+  if(h<8){return;} // rano przed otwarciem — nie scrollujemy
+  if(h>=18){return;} // wieczorem po zamknięciu
+  const tl=(h<10?"0":"")+h+":"+(m<10?"0":"")+m;
+  // Znajdź slot przez DOM (cal-time z textContent === tl)
+  const timeCells=document.querySelectorAll(".cal-time");
+  for(const cell of timeCells){
+    if(cell.textContent.trim()===tl){
+      cell.scrollIntoView({behavior:"smooth",block:"center"});
+      // Dodaj wizualny marker "teraz" przez dodanie klasy do tej linijki
+      cell.style.background="var(--sc)";
+      cell.style.color="#fff";
+      cell.style.fontWeight="700";
+      cell.title="Aktualny moment — "+now.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"});
+      break;
+    }
+  }
 }
 
 async function _renderCalMonth(appts,cls,consByClient){
@@ -3306,7 +3440,7 @@ async function showApt(id){
     h+='</div>';
   }
   h+='<div class="apt-actions">';
-  // FIX v1.2.10: Przycisk "📝 Otwórz formularz zgody" jako PIERWSZY w sekcji akcji.
+  // FIX v1.2.12: Przycisk "📝 Otwórz formularz zgody" jako PIERWSZY w sekcji akcji.
   // Otwiera widok zgody z pre-fillowanymi danymi klienta + zabiegiem z wizyty.
   // Jeśli klient miał już zgodę na ten zabieg → checkboxy zostają wstępnie wypełnione
   // ostatnimi odpowiedziami (klient tylko sprawdza zmiany i podpisuje ponownie).
@@ -3660,6 +3794,9 @@ async function showDet(cid){
   const appts=(await dbGetAll("appointments")).filter(x=>x.clientId===cid&&x.date>=new Date().toISOString().split("T")[0]).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
   const fn=(c.name||"").split(" ")[0];
   let h='<div class="dh"><div class="dn2">'+esc(c.name)+'</div><div><button class="b b2 bsm" onclick="showV(\'clients\')">←</button> <button class="b b1 bsm" onclick="openClientForm('+cid+',null)">✏️ Edytuj</button> <button class="b bd bsm" onclick="delCl('+cid+')" title="Standardowe usunięcie — może wrócić przy sync z innego urządzenia">🗑 Usuń</button> <button class="b bd bsm" onclick="deleteClientPermanent('+cid+')" title="RODO art. 17 — permanentne kasowanie z chmury i wszystkich urządzeń" style="background:#7a2222;color:#fff">⛔ RODO Usuń permanentnie</button></div></div>';
+  // FIX v1.2.12 (#1): AI Triage Klienta — automatyczna analiza historii i sugestia kolejnego kroku.
+  // Renderuje się w showDet po obliczeniu danych (cons, appts, sales).
+  h+='<div id="aiTriage" style="margin-top:6px"></div>';
   h+='<div class="fr"><div class="fl"><label>Tel</label><div style="font:400 11px var(--fb)">'+esc(c.phone||"—")+'</div></div><div class="fl"><label>Email</label><div style="font:400 11px var(--fb)">'+esc(c.email||"—")+'</div></div></div>';
   if(c.pesel||c.dob||c.address){
     h+='<div class="fr"><div class="fl"><label>PESEL</label><div style="font:400 11px var(--fb)">'+esc(c.pesel||"—")+'</div></div><div class="fl"><label>Data ur.</label><div style="font:400 11px var(--fb)">'+esc(c.dob||"—")+'</div></div></div>';
@@ -3836,7 +3973,7 @@ async function showDet(cid){
   h+='<div id="clientGallery" style="background:var(--bg2);border-radius:var(--rs);padding:8px;min-height:60px;font:300 10px var(--fb);color:var(--t2)">Ładowanie...</div>';
   h+='</div>';
 
-  // ===== FIX v1.2.10: Historia sprzedaży produktów USUNIĘTA z profilu klienta. =====
+  // ===== FIX v1.2.12: Historia sprzedaży produktów USUNIĘTA z profilu klienta. =====
   // Patryk: historia sprzedaży nie ma być widoczna w profilu klienta.
   // Pełna historia transakcji jest w widoku 🛍 Sprzedaż → "📋 Historia"
   // (z filtrowaniem per klient w modalu jeśli potrzeba).
@@ -3886,7 +4023,172 @@ async function showDet(cid){
   document.getElementById("detC").innerHTML=h;showV("detail");
   // Asynchronicznie załaduj galerię po wstawieniu HTML
   renderClientGallery(cid);
+  // FIX v1.2.12 (#1): AI Triage — analiza klienta i sugestia kolejnego kroku.
+  _renderClientTriage(cid,c,cons,appts);
   setTimeout(()=>{const p=document.getElementById("smsP");if(p)p.addEventListener("input",updSms);updSms();},50);
+}
+
+// FIX v1.2.12 (#1): AI Triage Klienta — wnioskowanie z lokalnych danych (bez API).
+// Pokazuje:
+//  • profil klienta (regularny / sporadyczny / nowy / powracający / ryzykowny)
+//  • optymalny moment kolejnej wizyty (na podstawie pola repeat z FM ostatniego zabiegu)
+//  • łączną wartość wydaną / liczba wizyt / średnia wizyta
+//  • alerty: brak na wizytach, długa nieobecność, wkrótce urodziny
+//  • next-best-action: jeden konkretny przycisk co zrobić TERAZ
+function _renderClientTriage(cid,c,cons,appts){
+  const wrap=document.getElementById("aiTriage");
+  if(!wrap)return;
+  const today=new Date();const todayIso=today.toISOString().substring(0,10);
+  // Wszystkie zabiegowe zgody (nie admin) - używamy ich jako "rzeczywistych wizyt"
+  const consZab=cons.filter(co=>!_isAdministrativeConsent(co.treatmentId));
+  const consSorted=consZab.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const lastVisit=consSorted[0];
+  const firstVisit=consSorted[consSorted.length-1];
+  // Oblicz dni od ostatniej wizyty
+  const daysSinceLast=lastVisit?Math.floor((today-new Date(lastVisit.date+"T12:00:00"))/(1000*60*60*24)):null;
+  // Oblicz wartość klienta — ze stockMoves (sprzedaż) + cen z FM dla zabiegów
+  let totalSpent=0;
+  consZab.forEach(co=>{
+    const fm=FM.find(m=>m.consentId===co.treatmentId);
+    if(fm)totalSpent+=+fm.price||0;
+  });
+  // Sprzedaż produktów
+  dbGetAll("stockMoves").then(moves=>{
+    const sales=moves.filter(m=>m.clientId===cid&&m.qty<0&&/^sprzedaż/i.test(m.reason||""));
+    const productsRevenue=sales.reduce((s,m)=>s+((+m.unit_price||0)*Math.abs(m.qty)),0);
+    totalSpent+=productsRevenue;
+    _renderClientTriageContent(wrap,c,consZab,appts,lastVisit,daysSinceLast,firstVisit,totalSpent,sales.length);
+  }).catch(()=>{
+    _renderClientTriageContent(wrap,c,consZab,appts,lastVisit,daysSinceLast,firstVisit,totalSpent,0);
+  });
+}
+
+function _renderClientTriageContent(wrap,c,consZab,appts,lastVisit,daysSinceLast,firstVisit,totalSpent,salesCount){
+  const today=new Date();const todayIso=today.toISOString().substring(0,10);
+  // Klasyfikacja klienta
+  let segment={label:"",color:"",emoji:""};
+  if(consZab.length===0){segment={label:"Nowy klient",color:"var(--ac)",emoji:"✨"};}
+  else if(consZab.length===1){segment={label:"Pojedyncza wizyta",color:"var(--wn)",emoji:"👤"};}
+  else if(consZab.length>=5){segment={label:"Klient stały",color:"var(--sc)",emoji:"⭐"};}
+  else{segment={label:"Powracający",color:"var(--g)",emoji:"🔁"};}
+  // Czy ryzyko churn? (>90 dni od ostatniej + miał ≥2 wizyty)
+  const churnRisk=daysSinceLast!==null&&daysSinceLast>90&&consZab.length>=2;
+  // Liczenie odwołanych wizyt — sztywno trudne (nie mamy oddzielnej tabeli odwołań),
+  // więc przybliżenie: appointments z datą w przeszłości BEZ powiązanej zgody = potencjalnie odwołane lub niezakończone
+  const futureAppts=appts.filter(a=>a.clientId===c.id&&a.date>=todayIso);
+  const nextAppt=futureAppts.sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))[0];
+  // Sugestia powtórki — z FM (pole repeat: "co 2-4 tyg.", "co 1-3 mies.", etc.)
+  let repeatSuggestion=null;
+  if(lastVisit){
+    const fm=FM.find(m=>m.consentId===lastVisit.treatmentId);
+    if(fm?.repeat){
+      // Próba parsowania: "co 2-4 tyg." → min 2 tyg = 14 dni
+      const m=fm.repeat.match(/(\d+)\s*-?\s*(\d+)?\s*(tyg|mies|dni)/i);
+      if(m){
+        const min=+m[1];const max=+m[2]||min;
+        const unit=m[3].toLowerCase();const mult=unit.startsWith("tyg")?7:unit.startsWith("mies")?30:1;
+        const minDays=min*mult;const maxDays=max*mult;
+        if(daysSinceLast!==null){
+          if(daysSinceLast<minDays){
+            repeatSuggestion={status:"too_early",msg:"Następna wizyta optymalna od "+(minDays-daysSinceLast)+" dni",zabieg:fm.name};
+          }else if(daysSinceLast<=maxDays){
+            repeatSuggestion={status:"now",msg:"Optymalny czas powtórki TERAZ",zabieg:fm.name,window:fm.repeat};
+          }else if(daysSinceLast<=maxDays+30){
+            repeatSuggestion={status:"overdue",msg:"Spóźnienie "+(daysSinceLast-maxDays)+" dni od optymalnego okna",zabieg:fm.name};
+          }else{
+            repeatSuggestion={status:"long_overdue",msg:"Bardzo długa przerwa ("+daysSinceLast+" dni) — proaktywny kontakt",zabieg:fm.name};
+          }
+        }
+      }
+    }
+  }
+  // Urodziny w okolicy (±14 dni)
+  let birthdayAlert=null;
+  if(c.dob){
+    const dobMatch=c.dob.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if(dobMatch){
+      const thisYear=today.getFullYear();
+      const dobThisYear=new Date(thisYear,+dobMatch[2]-1,+dobMatch[3]);
+      const daysDiff=Math.floor((dobThisYear-today)/(1000*60*60*24));
+      if(daysDiff>=0&&daysDiff<=14){birthdayAlert={days:daysDiff,date:dobMatch[2]+"."+dobMatch[3]};}
+      else if(daysDiff<0&&daysDiff>=-3){birthdayAlert={days:0,date:dobMatch[2]+"."+dobMatch[3],passed:true};}
+    }
+  }
+  // Wybierz next-best-action
+  let cta=null;
+  if(nextAppt){
+    cta={emoji:"📅",label:"Nadchodząca wizyta "+nextAppt.date+" o "+nextAppt.time,action:'showApt('+nextAppt.id+')',sub:esc(nextAppt.treatment||"")};
+  }else if(repeatSuggestion?.status==="now"){
+    cta={emoji:"🎯",label:"Zaproponuj powrót na "+repeatSuggestion.zabieg,action:'_smartProposeAppt('+c.id+',\''+repeatSuggestion.zabieg.replace(/'/g,"\\'")+'\')',sub:repeatSuggestion.msg};
+  }else if(repeatSuggestion?.status==="overdue"||repeatSuggestion?.status==="long_overdue"){
+    cta={emoji:"📱",label:"Wyślij SMS proponujący powrót",action:'_smartProposeSMS('+c.id+',\''+repeatSuggestion.zabieg.replace(/'/g,"\\'")+'\')',sub:repeatSuggestion.msg};
+  }else if(consZab.length===0){
+    cta={emoji:"📝",label:"Pierwsza zgoda — wybierz zabieg",action:'showV(\'consent\')',sub:"Klient nigdy nie był na zabiegu"};
+  }else if(birthdayAlert&&!birthdayAlert.passed){
+    cta={emoji:"🎂",label:"Urodziny za "+birthdayAlert.days+" dni — wyślij promocję",action:'_smartBirthdaySMS('+c.id+')',sub:"Data: "+birthdayAlert.date};
+  }
+  // RENDER
+  let html='<div style="background:linear-gradient(135deg,'+segment.color+'22,var(--bg2));border-left:4px solid '+segment.color+';border-radius:var(--rs);padding:12px;margin-bottom:8px">';
+  html+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">';
+  html+='<div style="font:700 13px var(--fb);color:'+segment.color+'">'+segment.emoji+' '+segment.label+'</div>';
+  html+='<div style="font:600 11px var(--fb);color:var(--t)">💰 <span style="color:var(--sc)">'+totalSpent.toFixed(0)+' zł</span> wartość · '+consZab.length+' '+(consZab.length===1?"wizyta":consZab.length<5?"wizyty":"wizyt")+(salesCount?' · '+salesCount+' zakupów':'')+'</div>';
+  html+='</div>';
+  // Statystyki
+  html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;font:400 10px var(--fb);margin-bottom:8px">';
+  if(daysSinceLast!==null){html+='<div style="background:var(--bg);padding:6px 8px;border-radius:var(--rs)"><div style="color:var(--t2);font-size:9px">OSTATNIA WIZYTA</div><div style="font:600 11px var(--fb)">'+daysSinceLast+' dni temu</div></div>';}
+  if(firstVisit){html+='<div style="background:var(--bg);padding:6px 8px;border-radius:var(--rs)"><div style="color:var(--t2);font-size:9px">PIERWSZA WIZYTA</div><div style="font:600 11px var(--fb)">'+esc(firstVisit.date)+'</div></div>';}
+  if(consZab.length>=2&&firstVisit&&lastVisit){
+    const span=Math.floor((new Date(lastVisit.date)-new Date(firstVisit.date))/(1000*60*60*24));
+    const avg=Math.round(span/(consZab.length-1));
+    if(avg>0)html+='<div style="background:var(--bg);padding:6px 8px;border-radius:var(--rs)"><div style="color:var(--t2);font-size:9px">ŚR. CZĘSTOTLIWOŚĆ</div><div style="font:600 11px var(--fb)">co '+avg+' dni</div></div>';
+  }
+  html+='</div>';
+  // Alerty
+  const alerts=[];
+  if(churnRisk)alerts.push({icon:"⚠",txt:"Ryzyko utraty klienta — "+daysSinceLast+" dni bez kontaktu",color:"var(--wn)"});
+  if(birthdayAlert&&!birthdayAlert.passed)alerts.push({icon:"🎂",txt:"Urodziny za "+birthdayAlert.days+" dni ("+birthdayAlert.date+") — okazja do promocji",color:"var(--ac)"});
+  if(alerts.length){
+    alerts.forEach(a=>{
+      html+='<div style="background:'+a.color+'22;border-left:3px solid '+a.color+';padding:6px 8px;border-radius:var(--rs);font:500 10px var(--fb);margin-bottom:4px">'+a.icon+' '+esc(a.txt)+'</div>';
+    });
+  }
+  // CTA
+  if(cta){
+    html+='<button class="b bs" style="width:100%;padding:12px;text-align:left;display:flex;align-items:center;gap:10px;margin-top:6px" onclick="'+cta.action+'">';
+    html+='<span style="font-size:24px;flex-shrink:0">'+cta.emoji+'</span>';
+    html+='<span style="flex:1"><strong style="font:700 12px var(--fb);display:block">'+esc(cta.label)+'</strong>';
+    if(cta.sub)html+='<span style="font:300 10px var(--fb);opacity:.85">'+esc(cta.sub)+'</span>';
+    html+='</span></button>';
+  }
+  html+='</div>';
+  wrap.innerHTML=html;
+}
+
+// Smart propozycja terminu — przekierowuje do kalendarza i pokazuje propozycje slotów
+function _smartProposeAppt(cid,treatmentName){
+  // Najprościej: przejdź do kalendarza, klient już zostaje "zapamiętany" do bookSlot
+  toast("📅 Wybierz wolny slot dla "+treatmentName,5000);
+  showV("calendar");
+  // Pre-set "last booking client" żeby bookSlot mógł go domyślnie zaznaczyć (przyszła rozbudowa)
+  window._proposedClientId=cid;
+}
+
+async function _smartProposeSMS(cid,treatmentName){
+  const cls=await dbGetAll("clients");
+  const c=cls.find(x=>x.id===cid);
+  if(!c?.phone){toast("⚠ Brak telefonu");return;}
+  const fn=(c.name||"").split(" ")[0];
+  const txt="Dzien dobry "+fn+"! Mineło sporo czasu od ostatniego "+treatmentName+". Polecam zaplanowac kolejna sesje aby utrzymac efekt. Zapraszamy! Tel: 503 672 015 - Gabinet Magda Maczynska";
+  window.open("sms:"+c.phone+"?body="+encodeURIComponent(txt));
+}
+
+async function _smartBirthdaySMS(cid){
+  const cls=await dbGetAll("clients");
+  const c=cls.find(x=>x.id===cid);
+  if(!c?.phone){toast("⚠ Brak telefonu");return;}
+  const fn=(c.name||"").split(" ")[0];
+  const txt="Dzien dobry "+fn+"! Z okazji zblizajacych sie urodzin mamy dla Pani specjalna oferte: 15% rabat na dowolny zabieg w miesiacu urodzin. Zapraszamy! Tel: 503 672 015 - Gabinet Magda Maczynska";
+  window.open("sms:"+c.phone+"?body="+encodeURIComponent(txt));
 }
 async function addPhotoToCon(conId){const inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.onchange=async()=>{const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=async e=>{const cons=await dbGetAll("consents");const con=cons.find(c=>c.id===conId);if(con){con.photoAfter=e.target.result;await dbPut("consents",con);toast("Zdjęcie dodane ✓");showDet(con.clientId);}};r.readAsDataURL(f);};inp.click();}
 function updSms(){const p=document.getElementById("smsP");if(!p)return;const txt=p.textContent||"";const enc=encodeURIComponent(txt);const sl=document.getElementById("smsL"),wl=document.getElementById("waL");if(sl)sl.href=sl.href.split("?")[0]+"?body="+enc;if(wl)wl.href=wl.href.split("?")[0]+"?text="+enc;const cnt=document.getElementById("smsCnt");if(cnt){const l=txt.length;cnt.textContent=l+" zn."+(l>160?" ("+Math.ceil(l/153)+" SMS)":"");}}
@@ -4673,6 +4975,93 @@ async function renderSalesPickedClient(){
   wrap.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><div><div style="font:600 12px var(--fb)">✓ '+esc(c.name)+'</div><div style="font:300 10px var(--fb);color:var(--t2)">'+(c.phone||"")+(c.email?" · "+esc(c.email):"")+'</div></div><button class="b b2 bsm" onclick="_salesCart.clientId=null;renderSalesPickedClient()">✕ Zmień</button></div>';
 }
 
+// FIX v1.2.12 (#7): Smart Search — globalna wyszukiwarka (Ctrl+K).
+// Szuka jednocześnie w: klientach, wizytach (po dacie/zabiegu), zgodach, produktach magazynu.
+// Ranking: dokładne dopasowanie nazwy → częściowe → email/telefon → zabieg.
+function openSmartSearch(){
+  const mc=document.getElementById("modC");
+  if(!mc)return;
+  mc.style.maxWidth="640px";mc.style.width="92vw";mc.style.maxHeight="90vh";
+  mc.innerHTML='<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><span style="font-size:24px">🔍</span><input type="text" id="smartSearchInp" placeholder="Szukaj klientów, wizyt, produktów..." autocomplete="off" oninput="_renderSmartSearch()" style="flex:1;padding:10px 12px;font:500 14px var(--fb);border:1px solid var(--bd);border-radius:var(--rs)"><button class="b b2 bsm" onclick="closeMo()">ESC</button></div>'+
+    '<div id="smartSearchResults" style="max-height:65vh;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--rs);background:var(--bg2)"><div style="padding:20px;text-align:center;font:300 11px var(--fb);color:var(--t2)">Wpisz zapytanie aby przeszukać klientów, wizyty i produkty</div></div>'+
+    '<div style="margin-top:6px;font:300 9px var(--fb);color:var(--t2);text-align:center">💡 Skrót klawiszowy: <strong>Ctrl+K</strong> · Enter aby wybrać pierwszy wynik</div>';
+  document.getElementById("modal").classList.add("on");
+  setTimeout(()=>{document.getElementById("smartSearchInp")?.focus();},50);
+}
+
+async function _renderSmartSearch(){
+  const q=(document.getElementById("smartSearchInp")?.value||"").toLowerCase().trim();
+  const out=document.getElementById("smartSearchResults");
+  if(!out)return;
+  if(q.length<2){out.innerHTML='<div style="padding:20px;text-align:center;font:300 11px var(--fb);color:var(--t2)">Wpisz min. 2 znaki</div>';return;}
+  // Wyszukiwanie równoległe w 3 źródłach
+  const [cls,appts,prods]=await Promise.all([dbGetAll("clients"),dbGetAll("appointments"),dbGetAll("products")]);
+  const today=new Date().toISOString().substring(0,10);
+  // Klienci — match po nazwie, telefonie, email
+  const clientResults=cls.filter(c=>{
+    const haystack=((c.name||"")+" "+(c.phone||"")+" "+(c.email||"")).toLowerCase();
+    return haystack.includes(q);
+  }).slice(0,8);
+  // Wizyty — match po nazwie zabiegu i nazwie klienta
+  const apptResults=appts.filter(a=>{
+    const cl=cls.find(c=>c.id===a.clientId);
+    const haystack=((a.treatment||"")+" "+(cl?.name||"")+" "+(a.date||"")+" "+(a.time||"")).toLowerCase();
+    return haystack.includes(q);
+  }).sort((a,b)=>{
+    // Najbliższe nadchodzące pierwsze, potem przeszłe od najnowszych
+    const aFut=a.date>=today;const bFut=b.date>=today;
+    if(aFut&&!bFut)return -1;if(!aFut&&bFut)return 1;
+    if(aFut)return (a.date+a.time).localeCompare(b.date+b.time);
+    return (b.date+b.time).localeCompare(a.date+a.time);
+  }).slice(0,6);
+  // Produkty — match po nazwie i marce
+  const prodResults=prods.filter(p=>((p.name||"")+" "+(p.brand||"")+" "+(p.category||"")).toLowerCase().includes(q)).slice(0,6);
+  // Render
+  let h="";
+  if(clientResults.length){
+    h+='<div style="background:var(--c);padding:6px 10px;font:600 10px var(--fb);color:var(--t);border-bottom:1px solid var(--bd)">👤 Klienci ('+clientResults.length+')</div>';
+    clientResults.forEach(c=>{
+      h+='<div onclick="closeMo();showDet('+c.id+')" style="padding:8px 10px;border-bottom:1px solid var(--bd);cursor:pointer;background:var(--c);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background=\'var(--bg2)\'" onmouseout="this.style.background=\'var(--c)\'">';
+      h+='<div><div style="font:600 11px var(--fb)">'+esc(c.name)+'</div><div style="font:300 9px var(--fb);color:var(--t2)">'+esc(c.phone||"")+(c.email?" · "+esc(c.email):"")+'</div></div>';
+      h+='<span style="font:300 9px var(--fb);color:var(--t2)">→ profil</span></div>';
+    });
+  }
+  if(apptResults.length){
+    h+='<div style="background:var(--c);padding:6px 10px;font:600 10px var(--fb);color:var(--t);border-bottom:1px solid var(--bd)">📅 Wizyty ('+apptResults.length+')</div>';
+    apptResults.forEach(a=>{
+      const cl=cls.find(c=>c.id===a.clientId);
+      const isFut=a.date>=today;
+      h+='<div onclick="closeMo();showApt('+a.id+')" style="padding:8px 10px;border-bottom:1px solid var(--bd);cursor:pointer;background:var(--c);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background=\'var(--bg2)\'" onmouseout="this.style.background=\'var(--c)\'">';
+      h+='<div><div style="font:600 11px var(--fb)">'+esc(cl?.name||"?")+(isFut?' <span style="color:var(--sc);font:400 8px var(--fb)">[nadchodząca]</span>':' <span style="color:var(--t2);font:400 8px var(--fb)">[przeszła]</span>')+'</div><div style="font:300 9px var(--fb);color:var(--t2)">'+esc(a.treatment||"")+' · '+esc(a.date)+' '+esc(a.time)+'</div></div>';
+      h+='<span style="font:300 9px var(--fb);color:var(--t2)">→ wizyta</span></div>';
+    });
+  }
+  if(prodResults.length){
+    h+='<div style="background:var(--c);padding:6px 10px;font:600 10px var(--fb);color:var(--t);border-bottom:1px solid var(--bd)">📦 Produkty ('+prodResults.length+')</div>';
+    prodResults.forEach(p=>{
+      h+='<div onclick="closeMo();showV(\'stock\')" style="padding:8px 10px;border-bottom:1px solid var(--bd);cursor:pointer;background:var(--c);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background=\'var(--bg2)\'" onmouseout="this.style.background=\'var(--c)\'">';
+      h+='<div><div style="font:600 11px var(--fb)">'+esc(p.name)+'</div><div style="font:300 9px var(--fb);color:var(--t2)">'+esc(p.brand||"")+(p.size?" · "+esc(p.size):"")+(p.retail_price?' · '+(+p.retail_price).toFixed(2)+' zł':'')+(p.stock!=null?' · stan '+p.stock:'')+'</div></div>';
+      h+='<span style="font:300 9px var(--fb);color:var(--t2)">→ magazyn</span></div>';
+    });
+  }
+  if(!h){h='<div style="padding:30px;text-align:center;font:400 11px var(--fb);color:var(--t2)">Brak wyników dla "<strong>'+esc(q)+'</strong>"</div>';}
+  out.innerHTML=h;
+}
+
+// Globalny skrót Ctrl+K — uruchamia smart search z dowolnego widoku
+window.addEventListener("keydown",function(e){
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){
+    e.preventDefault();
+    if(document.getElementById("modal")?.classList.contains("on")){closeMo();}
+    openSmartSearch();
+  }
+  // Enter w smart search → otwórz pierwszy wynik
+  if(e.key==="Enter"&&document.activeElement?.id==="smartSearchInp"){
+    const first=document.querySelectorAll("#smartSearchResults [onclick]")[0];
+    if(first){first.click();e.preventDefault();}
+  }
+});
+
 async function openSalesProductPicker(){
   // FIX 2 v1.2.7: Pokazujemy WSZYSTKIE produkty z magazynu (nie tylko retail/both).
   // Patryk: "w panelu sprzedaży mają się znajdować dostęp wszystkich produktów do odsprzedaży".
@@ -4826,7 +5215,7 @@ function resetSalesPanel(){
 }
 
 async function saveSale(mode){
-  // FIX v1.2.10: mode === 'plain' | 'sms' | 'email'
+  // FIX v1.2.12: mode === 'plain' | 'sms' | 'email'
   // Po zapisie transakcji (jeśli klient i ma kontakt) — otwiera aplikację SMS/Mail z gotowym
   // tekstem zawierającym: nazwę i markę produktu + sposób stosowania (z notes/recommendations).
   // BEZ cen i ilości — zgodnie z wymaganiem.
@@ -4905,7 +5294,7 @@ async function saveSale(mode){
   }
 }
 
-// FIX v1.2.10: SMS po sprzedaży — opis produktów + sposób stosowania, BEZ cen i ilości.
+// FIX v1.2.12: SMS po sprzedaży — opis produktów + sposób stosowania, BEZ cen i ilości.
 function _sendSalesSMS(cl,products){
   const fn=(cl.name||"").split(" ")[0];
   let txt="Dzien dobry "+fn+", dziekujemy za zakupy w Gabinecie Magda Maczynska. Twoje produkty:\n";
@@ -5011,7 +5400,7 @@ async function deleteSaleTransaction(saleId){
 }
 
 async function deleteStockItem(productId){
-  // FIX v1.2.10 (zadanie 5): permanentne usuwanie z tombstone — produkt nie wróci nawet po sync.
+  // FIX v1.2.12 (zadanie 5): permanentne usuwanie z tombstone — produkt nie wróci nawet po sync.
   if(!confirm("⚠ PERMANENTNIE USUNĄĆ ten produkt z bazy?\n\nProdukt zostanie usunięty:\n• z tego urządzenia\n• z chmury (Supabase)\n• z innych urządzeń kosmetolożki przy następnej synchronizacji\n\nFlaga tombstone w localStorage zapobiegnie ponownemu pojawieniu się produktu po sync.\n\nHistoria ruchów magazynowych (sprzedaż, użycie) pozostanie nietknięta."))return;
   await dbDel("products",productId);
   // Permanentne DELETE — tombstone + 3× retransmisja do Supabase
@@ -5020,7 +5409,7 @@ async function deleteStockItem(productId){
   markDirty();toast("✅ Permanentnie usunięto");renderStock();
 }
 
-// FIX v1.2.10 (zadanie 5): Permanentne usuwanie klienta — analogicznie do produktów.
+// FIX v1.2.12 (zadanie 5): Permanentne usuwanie klienta — analogicznie do produktów.
 // UWAGA: kasuje też wszystkie powiązane wpisy (zgody, wizyty, zdjęcia z galerii).
 // Zgodnie z RODO klient ma prawo do bycia zapomnianym (art. 17 RODO) — kosmetolog tym przyciskiem
 // realizuje to żądanie.
@@ -7186,7 +7575,7 @@ function showKioskChoice(){
   const trName=tSel.options[tSel.selectedIndex]?.textContent||"zabieg";
   const modC=document.getElementById("modC");
   if(!modC)return;
-  // FIX v1.2.10: Jeden monit z 5 opcjami zamiast dwóch oddzielnych ekranów.
+  // FIX v1.2.12: Jeden monit z 5 opcjami zamiast dwóch oddzielnych ekranów.
   // Patryk: kosmetolog wybiera zabieg, a potem od razu w jednym ekranie decyduje co dalej:
   //   • wyszukaj klienta z bazy (autocomplete)
   //   • dodaj nowego klienta (modal)
@@ -7221,7 +7610,7 @@ function showKioskChoice(){
     '</div>'+
     '<div style="font:600 10px var(--fb);color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin:10px 0 4px">📱 Tryb wypełniania zgody</div>'+
     '<div style="display:grid;grid-template-columns:1fr;gap:6px">'+
-      // FIX v1.2.10: "Tablet dla klienta" zawsze aktywny — klient może sam wypełnić swoje dane.
+      // FIX v1.2.12: "Tablet dla klienta" zawsze aktywny — klient może sam wypełnić swoje dane.
       // Wcześniej było zablokowane gdy brak danych klienta, ale to było niepotrzebne ograniczenie:
       // klient ma prawo (i czas) wpisać imię, telefon, datę urodzenia samodzielnie.
       '<button class="b bs" style="padding:12px;text-align:left;display:flex;align-items:center;gap:10px" onclick="closeMo();kioskEnter()">'+
@@ -7345,7 +7734,7 @@ async function globalFullSync(showProgress=true){
 
     // === PUSH: wyślij lokalne rekordy DOPIERO PO synchronizacji DELETE-ów ===
     // Ważne: musimy odczytać IDB ponownie (po dbDel powyżej), bo localProds jest stale.
-    // FIX v1.2.10: Filtrujemy tombstones — rekordy permanentnie usunięte przez kosmetologa
+    // FIX v1.2.12: Filtrujemy tombstones — rekordy permanentnie usunięte przez kosmetologa
     // nie wracają do chmury nawet jeśli zostały gdzieś lokalnie.
     const [clientsAfter,consAfter,apptsAfter,prodsAfter,movesAfter]=await Promise.all([
       dbGetAll("clients"),dbGetAll("consents"),dbGetAll("appointments"),
