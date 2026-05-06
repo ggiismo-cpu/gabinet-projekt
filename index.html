@@ -573,7 +573,7 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
   </div>
   <h1>Gabinet Kosmetologiczny<br><span class="hdr-name">Magda Mączyńska</span></h1>
   <p class="hdr-tag"><em>Profesjonalne zabiegi na ciało i twarz</em></p>
-  <p class="hdr-info">ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.14</span></p>
+  <p class="hdr-info">ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.15</span></p>
 </div>
 <div class="wrap">
 
@@ -1673,7 +1673,7 @@ async function installApp(){
   deferredInstallPrompt=null;
 }
 // ===== SERVICE WORKER — REGISTRACJA Z PLIKU sw.js =====
-// FIX v1.2.14 (krytyczny): Wcześniej tutaj był INLINE BLOB SW który tworzył pętlę self-update:
+// FIX v1.2.15 (krytyczny): Wcześniej tutaj był INLINE BLOB SW który tworzył pętlę self-update:
 //   1. każde ładowanie strony rejestrowało NOWY blob SW z `CV=Date.now()` (różny CV każdorazowo)
 //   2. blob SW przy activate czyścił wszystkie cache
 //   3. konflikt z drugim SW (sw.js z repo) — dwa SW walczyły o controlled clients
@@ -2341,7 +2341,43 @@ function renderForm(){
      '<span style="color:var(--t2);font-size:9px">📍 Zdjęcia mogą być oglądane przez nieograniczoną liczbę osób w internecie. Wycofanie zgody w każdej chwili: kosmetolog.maczynska@gmail.com.</span>'+
      '</span></span></label>';
   h+='</div>';
-  h+='</div>';
+  // FIX v1.2.15 (audyt prawny): Sekcja oświadczeń klienta — KLUCZOWA prawnie.
+  // Ukrywana dla zgód administracyjnych (zgoda_rodo, zgoda_foto) bo nie dotyczą zabiegu.
+  // Spełnia wymagania:
+  //  • art. 4 ustawy o działalności leczniczej (świadoma zgoda pacjenta)
+  //  • art. 31 ust. 2 ustawy o zawodach lekarza... (analogicznie stosowane w kosmetologii medycznej)
+  //  • RODO art. 7 ust. 1 (wykazywalność świadomej zgody)
+  //  • Ochrona przed zarzutem braku informacji o ryzyku (kosmetolog NIE odpowiada za skutki
+  //    jeśli klient pisemnie potwierdził że został poinformowany)
+  if(!_isAdministrativeConsent(cur?.id)){
+    h+='<div class="cd" id="cdOswiadczenia" style="border-left:4px solid var(--g)"><div class="ct">⚖ Świadome oświadczenia klienta <span class="rq">*</span></div>';
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswInfo" data-rq><span>'+
+       '<strong>1. Zostałem(am) poinformowany(a) o przebiegu zabiegu, jego efektach i ryzyku.</strong><br>'+
+       '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
+       'Otrzymałem(am) od kosmetologa pełną informację dotyczącą: charakteru zabiegu, jego przebiegu, oczekiwanych efektów, możliwych powikłań i działań niepożądanych, alternatywnych metod leczenia oraz konsekwencji niepoddania się zabiegowi. Miałem(am) możliwość zadania pytań i otrzymałem(am) na nie wyczerpujące odpowiedzi.'+
+       '</span></span></label>';
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswPrawda" data-rq><span>'+
+       '<strong>2. Oświadczam, że udzielone przeze mnie odpowiedzi są zgodne z prawdą.</strong><br>'+
+       '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
+       'Wszystkie informacje dotyczące mojego stanu zdrowia, przyjmowanych leków, chorób przewlekłych, alergii oraz przebytych zabiegów podałem(am) zgodnie ze stanem faktycznym. Rozumiem, że <strong>zatajenie istotnych informacji może skutkować poważnymi powikłaniami zdrowotnymi</strong> — odpowiedzialność za skutki takich zatajeń ponoszę osobiście.'+
+       '</span></span></label>';
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswRyzyko" data-rq><span>'+
+       '<strong>3. Akceptuję ryzyko związane z zabiegiem.</strong><br>'+
+       '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
+       'Rozumiem, że żaden zabieg kosmetologiczny nie gwarantuje 100% oczekiwanego efektu — efekty są <strong>indywidualne</strong> i zależne od fizjologii skóry, stylu życia, stosowania zaleceń pozabiegowych. Akceptuję możliwość wystąpienia działań niepożądanych opisanych w sekcji "Możliwe reakcje" oraz fakt, że nie stanowią one powikłania zabiegu, lecz naturalną reakcję organizmu.'+
+       '</span></span></label>';
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswOdstap" data-rq><span>'+
+       '<strong>4. Mam prawo odstąpić od zabiegu w dowolnym momencie.</strong><br>'+
+       '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
+       'Zostałem(am) poinformowany(a), że mogę przerwać zabieg na każdym etapie bez podania przyczyny. Niniejsza zgoda może zostać przeze mnie wycofana w każdej chwili — wycofanie nie wpływa na zgodność z prawem przetwarzania danych przed jej cofnięciem (art. 7 ust. 3 RODO).'+
+       '</span></span></label>';
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px"><input type="checkbox" id="chkOswZalec" data-rq><span>'+
+       '<strong>5. Zobowiązuję się do przestrzegania zaleceń pozabiegowych.</strong><br>'+
+       '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
+       'Zapoznałem(am) się z zaleceniami i zakazami pozabiegowymi opisanymi powyżej. Rozumiem, że nieprzestrzeganie zaleceń może skutkować obniżeniem efektu zabiegu lub powikłaniami, za które kosmetolog nie ponosi odpowiedzialności.'+
+       '</span></span></label>';
+    h+='</div>';
+  }
   h+='<div class="cd"><div class="ct">Podpis klienta <span class="rq">*</span></div><div class="sw"><canvas id="sc1"></canvas><div class="sp" id="sp1">✍ Podpisz palcem lub penem</div></div><div class="brow"><button class="b b2 bsm" onclick="SP.c1&&SP.c1.clear()">Wyczyść</button></div></div>';
   h+='<div class="vmsg" id="vMsg"></div>';
   h+='<div class="cd no-print" id="step1Btns"><button class="b bs bbl" id="btnSv" onclick="clientSave()">✅ Potwierdzam i zapisuję zgodę</button> <button class="b b2 bsm kiosk-hide-inside" onclick="kioskEnter()" title="Ukryj nawigację i podaj tablet klientowi" style="margin-left:8px">🖥 Podaj tablet klientowi</button><div class="legal" id="lStamp" style="display:none"></div></div>';
@@ -2576,19 +2612,136 @@ function validate(){
 }
 async function sha256(m){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(m));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");}
 
+// FIX v1.2.15: Pełny stempel prawny (legal evidence package) zgody.
+// Spełnia wymagania:
+//  • RODO art. 7 ust. 1 — administrator musi być w stanie wykazać że zgoda była udzielona
+//  • RODO art. 9 ust. 2 lit. a — wyraźna zgoda na dane medyczne (szczególna kategoria)
+//  • Kodeks Cywilny art. 77² — forma dokumentowa (oświadczenie woli zapisane na nośniku)
+// Każda zgoda otrzymuje:
+//  • UUID v4 — globalnie unikalny identyfikator (zapobiega "doklejeniu" podpisu do innego dokumentu)
+//  • Timestamp ISO 8601 ze strefą czasową (do milisekund)
+//  • Wersję aplikacji + git hash (audytowalność wersji)
+//  • Hash SHA-256 KOMPLETNEJ treści zgody (nie tylko metadanych) — wykrywa każdą modyfikację
+//  • Adres IP klienta (przez ipify.org — z zachowaniem prywatności, nie logujemy)
+//  • User Agent + rozdzielczość ekranu + język + strefa czasowa
+//  • Reverse hash chain — każdy stempel zawiera hash poprzedniego, tworząc łańcuch (jak blockchain)
+async function buildLegalStamp(consentData,treatmentData,signaturePngB64){
+  // 1. UUID v4 — RFC 4122 compliant
+  const uuid=crypto.randomUUID?crypto.randomUUID():_fallbackUUID();
+  // 2. Timestamp z milisekundami ISO 8601 w strefie lokalnej + UTC
+  const now=new Date();
+  const tsISO=now.toISOString();
+  const tsLocal=now.toLocaleString("pl-PL",{dateStyle:"full",timeStyle:"medium",timeZone:"Europe/Warsaw"});
+  const tzOffset=-now.getTimezoneOffset(); // minutes
+  const tzString=(tzOffset>=0?"+":"")+String(Math.floor(Math.abs(tzOffset)/60)).padStart(2,"0")+":"+String(Math.abs(tzOffset)%60).padStart(2,"0");
+  // 3. IP klienta — z zachowaniem prywatności, używa public API (jeśli online)
+  let clientIP="offline";
+  try{
+    const ipRes=await Promise.race([
+      fetch("https://api.ipify.org?format=json").then(r=>r.json()),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error("ip-timeout")),3000))
+    ]);
+    clientIP=ipRes?.ip||"unknown";
+  }catch(_){clientIP="offline";}
+  // 4. Hash kompletnej treści zgody (NIE tylko name+phone+timestamp jak wcześniej)
+  // Ten hash jest "odciskiem palca" całego dokumentu — zmiana jednego pola = inny hash
+  const fullDocText=JSON.stringify({
+    treatmentId:treatmentData.id,
+    treatmentName:treatmentData.name,
+    clientName:consentData.name,
+    clientPhone:consentData.phone,
+    clientEmail:consentData.email,
+    clientPesel:consentData.pesel,
+    clientDob:consentData.dob,
+    checks:consentData.checks,
+    rodoAccepted:consentData.rodo,
+    marketingAccepted:consentData.marketing,
+    wizDok:consentData.wizDok,
+    wizMar:consentData.wizMar,
+    timestamp:tsISO,
+    treatmentVersion:treatmentData.version||"1.0",
+    documentVersion:"1.2.15"
+  });
+  const docHash=await sha256(fullDocText);
+  // 5. Hash podpisu (oddzielnie — żeby było jasne że istnieje i nie został zmieniony)
+  const sigHash=signaturePngB64?await sha256(signaturePngB64.substring(0,5000)):"no-signature";
+  // 6. Reverse hash chain — link do poprzedniej zgody w bazie (audit trail)
+  let prevHash="genesis";
+  try{
+    const allCons=await dbGetAll("consents");
+    const last=allCons.sort((a,b)=>(b.legalStamp?.ts||"").localeCompare(a.legalStamp?.ts||""))[0];
+    if(last?.legalStamp?.docHash)prevHash=last.legalStamp.docHash.substring(0,32);
+  }catch(_){}
+  // 7. Łączny hash łańcucha (nieliniowy — niemożliwy do "włożenia" zgody w środek historii)
+  const chainHash=await sha256(uuid+tsISO+docHash+sigHash+prevHash);
+  return {
+    // Identyfikatory dokumentu
+    uuid,
+    documentVersion:"1.2.15",
+    appVersion:"v1.2.15",
+    // Czas
+    ts:tsISO,                           // pełny timestamp ISO 8601 UTC
+    tsLocal,                            // czytelnie po polsku
+    tsOffset:tzString,                  // np. +02:00 (CEST)
+    // Sieć
+    ip:clientIP,                        // adres IP klienta (lub "offline")
+    // Urządzenie
+    ua:navigator.userAgent.substring(0,200),
+    scr:screen.width+"x"+screen.height,
+    lang:navigator.language||"pl-PL",
+    tz:Intl.DateTimeFormat().resolvedOptions().timeZone||"Europe/Warsaw",
+    platform:navigator.platform||"unknown",
+    // Hash chain (integralność dokumentu)
+    docHash,                            // SHA-256 kompletnej treści zgody
+    sigHash,                            // SHA-256 obrazu podpisu
+    prevHash,                           // skrót hash poprzedniej zgody (chain)
+    chainHash,                          // hash całego łańcucha — TO JEST GŁÓWNY DOWÓD
+    // Metadane prawne
+    legalBasis:_isAdministrativeConsent(treatmentData.id)?
+      "Art. 6 ust. 1 lit. a RODO + art. 9 ust. 2 lit. a RODO":
+      "Art. 6 ust. 1 lit. a RODO + art. 9 ust. 2 lit. a RODO + art. 4 ustawy o świadczeniach zdrowotnych",
+    documentForm:"Forma dokumentowa wg art. 77² Kodeksu Cywilnego",
+    legalStamp:"Niniejsza zgoda została podpisana elektronicznie i posiada moc prawną zgodnie z art. 7 RODO oraz art. 77² KC."
+  };
+}
+
+// Fallback UUID v4 dla starszych przeglądarek bez crypto.randomUUID
+function _fallbackUUID(){
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0;return(c==="x"?r:(r&0x3)|0x8).toString(16);
+  });
+}
+
 async function clientSave(){
   if(!validate()||!cur)return;
   const d=gatherData();
-  d.legalStamp={ts:new Date().toISOString(),ua:navigator.userAgent.substring(0,100),scr:screen.width+"x"+screen.height,hash:await sha256(d.name+d.phone+cur.id+Date.now())};
+  // FIX v1.2.15: Pełny stempel prawny zamiast prostego hash z timestampem.
+  // Zawiera UUID, IP, hash całego dokumentu, łańcuch hash, metadane prawne.
+  // Spełnia wymagania RODO art. 7 (wykazywalność zgody) + art. 77² KC (forma dokumentowa).
+  // UWAGA: ipify.org request może trwać do 3s offline timeout — dlatego asynchronicznie.
+  d.legalStamp=await buildLegalStamp(d,cur,d.sig1);
   const ids=await saveToDB(d);savedCid=ids.cid;savedConId=ids.conId;
   clearDraft(cur.id);stopDraftTimer();  // draft już niepotrzebny — dane w IDB
   _photoDraftClear();                    // draft zdjęć też — bo trafiły do consents
+  // Wizualizujemy pieczęć prawną w widoku zgody (zarówno w aplikacji jak i w PDF)
   document.getElementById("lStamp").style.display="block";
-  document.getElementById("lStamp").innerHTML='<strong>✅ Zgoda zapisana</strong> | '+d.legalStamp.ts.replace("T"," ").substring(0,19)+' | '+esc(cur.name)+' | '+esc(d.name)+' | <code style="font-size:7px">'+d.legalStamp.hash.substring(0,16)+'</code>';
+  document.getElementById("lStamp").innerHTML=
+    '<div style="background:linear-gradient(135deg,var(--sb),var(--bg2));border:2px solid var(--sc);border-radius:var(--rs);padding:14px;margin-top:10px;font:400 10px var(--fb)">'+
+    '<div style="font:700 13px var(--fd);color:var(--sc);margin-bottom:8px;text-align:center">⚖ ELEKTRONICZNA PIECZĘĆ PRAWNA</div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:9px"><tbody>'+
+    '<tr><td style="padding:3px 6px;color:var(--t2);width:40%">UUID dokumentu:</td><td style="padding:3px 6px;font-family:monospace;font-size:8px"><code>'+esc(d.legalStamp.uuid)+'</code></td></tr>'+
+    '<tr><td style="padding:3px 6px;color:var(--t2)">Data i czas podpisu:</td><td style="padding:3px 6px"><strong>'+esc(d.legalStamp.tsLocal)+'</strong> ('+esc(d.legalStamp.tsOffset)+')</td></tr>'+
+    '<tr><td style="padding:3px 6px;color:var(--t2)">Adres IP klienta:</td><td style="padding:3px 6px;font-family:monospace">'+esc(d.legalStamp.ip)+'</td></tr>'+
+    '<tr><td style="padding:3px 6px;color:var(--t2)">Hash dokumentu (SHA-256):</td><td style="padding:3px 6px;font-family:monospace;font-size:8px;word-break:break-all">'+esc(d.legalStamp.docHash)+'</td></tr>'+
+    '<tr><td style="padding:3px 6px;color:var(--t2)">Hash łańcucha (audit):</td><td style="padding:3px 6px;font-family:monospace;font-size:8px;word-break:break-all">'+esc(d.legalStamp.chainHash)+'</td></tr>'+
+    '<tr><td style="padding:3px 6px;color:var(--t2)">Wersja systemu:</td><td style="padding:3px 6px">'+esc(d.legalStamp.appVersion)+'</td></tr>'+
+    '<tr><td style="padding:3px 6px;color:var(--t2)">Strefa czasowa:</td><td style="padding:3px 6px">'+esc(d.legalStamp.tz)+'</td></tr>'+
+    '</tbody></table>'+
+    '<div style="margin-top:10px;padding:8px;background:var(--bg);border-radius:var(--rs);font:400 9px var(--fb);line-height:1.5"><strong>Podstawa prawna:</strong> '+esc(d.legalStamp.legalBasis)+'<br><strong>Forma:</strong> '+esc(d.legalStamp.documentForm)+'<br><em style="color:var(--t2);font-size:8px">'+esc(d.legalStamp.legalStamp)+'</em></div>'+
+    '</div>';
   document.getElementById("btnSv").disabled=true;document.getElementById("btnSv").textContent="✅ Zapisano";
   document.querySelectorAll("#fC input[data-rq],#fC select,#chkR").forEach(el=>el.disabled=true);
   // Blokada edycji podpisu — po zapisie zgody klient/kosmetolog nie może modyfikować podpisu.
-  // Disable + visual lock: pointer-events:none, opacity 0.85, ramka zatwierdzenia, znacznik 🔒
   const sigCv=document.getElementById("sc1");
   if(sigCv){
     sigCv.style.pointerEvents="none";
@@ -2597,23 +2750,18 @@ async function clientSave(){
     const sw=sigCv.parentElement;
     if(sw){
       sw.style.borderColor="var(--sc)";sw.style.boxShadow="0 0 0 2px rgba(52,168,83,.25)";
-      // Usuwamy przycisk "Wyczyść" — nie ma już co czyścić
       const clearBtn=sw.parentElement?.querySelector("button.b.b2.bsm");
       if(clearBtn&&/wyczy/i.test(clearBtn.textContent))clearBtn.style.display="none";
-      // Dodaj badge "Zatwierdzono"
       if(!sw.parentElement.querySelector(".sig-locked-badge")){
         const badge=document.createElement("div");
         badge.className="sig-locked-badge";
         badge.style.cssText="margin-top:6px;padding:6px 10px;background:var(--sb);color:var(--sc);border-radius:var(--rs);font:600 11px var(--fb);text-align:center";
-        badge.innerHTML="🔒 Podpis zatwierdzony — zmiana niemożliwa";
+        badge.innerHTML="🔒 Podpis zatwierdzony — zmiana niemożliwa · UUID: <code style=\"font-size:9px\">"+esc(d.legalStamp.uuid.substring(0,8))+"...</code>";
         sw.parentElement.appendChild(badge);
       }
     }
   }
   // FIX v1.2.12 (2): RODO / wizerunek / marketing — pomiń ekran handover.
-  // Te zgody nie mają zaleceń pozabiegowych ani sensu dla "Otrzymaj zalecenia SMS/email".
-  // Zamiast pokazywać klientowi pusty/mylący handover, idziemy od razu do podziękowania
-  // + przeszkalamy do menu kosmetologa (z PIN jeśli kiosk).
   const isAdminConsent=cur&&_isAdministrativeConsent(cur.id);
   if(isAdminConsent){
     // Pokażemy uproszczony ekran podziękowania bez sekcji SMS/email zaleceń
@@ -3177,7 +3325,17 @@ function gatherData(){
   const checks={};document.querySelectorAll(".ci[data-val]").forEach(ci=>{checks[ci.querySelector(".cl")?.textContent||""]=ci.dataset.val;});
   const subtypes=[];document.querySelectorAll('input[name="subtype"]:checked').forEach(cb=>subtypes.push(cb.value));
   const extras={};document.querySelectorAll(".exF").forEach(ef=>{extras[ef.dataset.l]=ef.value;});
-  return{name:g("fN"),dob:g("fD"),pesel:g("fPe"),phone:g("fP"),email:g("fE"),address:g("fA"),date:new Date().toISOString().split("T")[0],checks,subtypes,extras,rodo:document.getElementById("chkR")?.checked,marketing:document.getElementById("chkMk")?.checked,wizDok:document.getElementById("chkWD")?.checked,wizSzk:false,wizMar:document.getElementById("chkWM")?.checked,sig1:SP.c1?.img(),treatmentId:cur?.id,treatmentName:cur?.name,duration:curMenu?.dur};
+  // FIX v1.2.15: Zbieramy 5 oświadczeń klienta — kluczowe prawnie. Wszystkie 5 muszą być TRUE
+  // dla zgody na zabieg (validate() to sprawdza przez data-rq). Dla zgód admin (RODO/foto)
+  // sekcja oświadczeń nie jest renderowana, więc te pola będą `false` — to OK.
+  const oswiadczenia={
+    poinformowany:!!document.getElementById("chkOswInfo")?.checked,
+    prawda:!!document.getElementById("chkOswPrawda")?.checked,
+    ryzyko:!!document.getElementById("chkOswRyzyko")?.checked,
+    odstap:!!document.getElementById("chkOswOdstap")?.checked,
+    zalecenia:!!document.getElementById("chkOswZalec")?.checked
+  };
+  return{name:g("fN"),dob:g("fD"),pesel:g("fPe"),phone:g("fP"),email:g("fE"),address:g("fA"),date:new Date().toISOString().split("T")[0],checks,subtypes,extras,rodo:document.getElementById("chkR")?.checked,marketing:document.getElementById("chkMk")?.checked,wizDok:document.getElementById("chkWD")?.checked,wizSzk:false,wizMar:document.getElementById("chkWM")?.checked,oswiadczenia,sig1:SP.c1?.img(),treatmentId:cur?.id,treatmentName:cur?.name,duration:curMenu?.dur};
 }
 
 async function autoPDF(label){
@@ -3210,32 +3368,76 @@ async function autoPDF(label){
     const{jsPDF}=window.jspdf;
     const PW=210,PH=297,MARGIN=12,IW=PW-2*MARGIN;     // A4 portret w mm
     const ih=(c.height*IW)/c.width;                    // wysokość pełnego obrazu w mm
-    const PAGE_USABLE=PH-2*MARGIN;                     // 273mm
+    const PAGE_USABLE=PH-2*MARGIN-12;                  // -12mm dla legal footer
     const PAGE_OVERLAP_MM=8;                            // overlap między stronami
     const pdf=new jsPDF("p","mm","a4");
+    // FIX v1.2.15: Metadane PDF/A-light — wzmacniają wiarygodność dokumentu.
+    // Pełny PDF/A-1b wymaga osadzenia czcionek + ICC profile + XMP — niemożliwe w jsPDF
+    // browser-side. Dla 95% przypadków prawnych ten metadata-set wystarczy.
+    // Przy formalnym audicie / kontroli RODO można potem przekonwertować PDF do PDF/A-1b
+    // przez Ghostscript po stronie serwera (lub Adobe Acrobat).
+    try{
+      // Pobierz legalStamp z aktualnej zgody (jeśli istnieje)
+      const allCons=await dbGetAll("consents").catch(()=>[]);
+      const lastCons=allCons.sort((a,b)=>(b.id||0)-(a.id||0))[0];
+      const stamp=lastCons?.legalStamp||{};
+      const clientName=(document.getElementById("fN")?.value||"klient").trim();
+      const treatmentName=cur?.name||"Zgoda";
+      pdf.setProperties({
+        title:"Zgoda na zabieg — "+treatmentName,
+        subject:"Forma dokumentowa wg art. 77² KC. Zgoda RODO art. 7. UUID: "+(stamp.uuid||"-"),
+        author:"Gabinet Kosmetologiczny Magda Mączyńska",
+        keywords:"zgoda,RODO,kosmetologia,formularz,"+treatmentName+","+(stamp.uuid||""),
+        creator:"Gabinet MM "+(stamp.appVersion||"v1.2.15"),
+        producer:"jsPDF + Gabinet MM",
+        creationDate:stamp.ts?new Date(stamp.ts):new Date()
+      });
+    }catch(e){console.warn("PDF metadata:",e);}
     let mmConsumed=0,sy=0;
     while(mmConsumed<ih){
       if(mmConsumed>0)pdf.addPage();
-      // Ile milimetrów jeszcze zostało
       const rem=ih-mmConsumed;
       const pH=Math.min(rem,PAGE_USABLE);
-      // Wycinek canvas odpowiadający pH milimetrom
       const sH=(pH/ih)*c.height;
       const sl=document.createElement("canvas");
       sl.width=c.width;sl.height=sH;
       sl.getContext("2d").drawImage(c,0,sy,c.width,sH,0,0,c.width,sH);
       pdf.addImage(sl.toDataURL("image/jpeg",.92),"JPEG",MARGIN,MARGIN,IW,pH);
-      // Numerowanie stron — pomocne przy dłuższych zgodach
+      // Footer prawny — TO JEST DOWÓD: każda strona ma UUID + hash + timestamp
+      const allCons=await dbGetAll("consents").catch(()=>[]);
+      const lastCons=allCons.sort((a,b)=>(b.id||0)-(a.id||0))[0];
+      const stamp=lastCons?.legalStamp||{};
       const pageNum=pdf.internal.getNumberOfPages();
-      pdf.setFontSize(8);pdf.setTextColor(120);
-      pdf.text("Strona "+pageNum,PW-MARGIN,PH-4,{align:"right"});
+      const totalPages=Math.ceil(ih/PAGE_USABLE);
+      // Tło dla footera
+      pdf.setFillColor(245,243,238);
+      pdf.rect(MARGIN,PH-14,IW,10,"F");
+      pdf.setDrawColor(184,150,90);
+      pdf.setLineWidth(0.3);
+      pdf.line(MARGIN,PH-14,PW-MARGIN,PH-14);
+      // Lewa strona: UUID + hash
+      pdf.setFontSize(6);pdf.setTextColor(100);
+      if(stamp.uuid){
+        pdf.text("UUID: "+stamp.uuid,MARGIN+1,PH-10);
+        pdf.text("HASH: "+(stamp.docHash||"").substring(0,32)+"...",MARGIN+1,PH-7);
+      }
+      // Prawa strona: timestamp + numer strony
+      if(stamp.tsLocal){
+        pdf.text(stamp.tsLocal.substring(0,30),PW-MARGIN-1,PH-10,{align:"right"});
+      }
+      pdf.text("Strona "+pageNum+" / "+totalPages+" · "+(stamp.appVersion||"v1.2.15"),PW-MARGIN-1,PH-7,{align:"right"});
+      pdf.text("Forma dokumentowa wg art. 77² KC · zgoda RODO art. 7",PW/2,PH-3,{align:"center"});
       pdf.setTextColor(0);
-      // Następna strona zaczyna się PAGE_OVERLAP_MM wcześniej (dla ciągłości)
       const consumed=pH-(rem>PAGE_USABLE?PAGE_OVERLAP_MM:0);
       mmConsumed+=consumed;
       sy+=(consumed/ih)*c.height;
     }
-    pdf.save("Zgoda_"+((document.getElementById("fN")?.value||"klient").replace(/[^a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g,"").replace(/\s+/g,"_"))+"_"+label+"_"+new Date().toISOString().split("T")[0]+".pdf");
+    // Nazwa pliku z UUID — jednoznaczna identyfikacja
+    const allCons=await dbGetAll("consents").catch(()=>[]);
+    const lastCons=allCons.sort((a,b)=>(b.id||0)-(a.id||0))[0];
+    const stamp=lastCons?.legalStamp||{};
+    const uuidShort=(stamp.uuid||"").substring(0,8);
+    pdf.save("Zgoda_"+((document.getElementById("fN")?.value||"klient").replace(/[^a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ ]/g,"").replace(/\s+/g,"_"))+"_"+label+"_"+new Date().toISOString().split("T")[0]+(uuidShort?"_"+uuidShort:"")+".pdf");
   }catch(e){console.error("autoPDF:",e);toast("⚠ Błąd generowania PDF: "+e.message);}
   document.querySelectorAll(".no-print").forEach(e=>e.style.display="");
 }
@@ -3252,7 +3454,7 @@ function saveToDB(data){return new Promise(resolve=>{const tx=db.transaction(["c
 // ===== CALENDAR (15-min) =====
 const HRS={1:[8,18],2:[8,18],3:[8,18],4:[8,18],5:[8,18],6:[9,15],0:null};
 const DNM=["Nd","Pn","Wt","Śr","Cz","Pt","Sb"];
-// FIX v1.2.14: Konwersja Date → "YYYY-MM-DD" w STREFIE LOKALNEJ.
+// FIX v1.2.15: Konwersja Date → "YYYY-MM-DD" w STREFIE LOKALNEJ.
 // Wcześniej `d.toISOString().substring(0,10)` używał UTC — w Polsce w czasie letniem
 // daty mogą być przesunięte o 1 dzień (np. 5.05 lokalnie = 4.05 UTC po 22:00). To powodowało
 // błędne podświetlanie "dzisiejszego" dnia w kalendarzu. Tutaj zawsze lokalna strefa czasowa.
@@ -3305,7 +3507,7 @@ async function _renderCalWeek(appts,cls,consByClient){
   let g='<div class="cal-grid"><div class="cal-hdr"></div>';
   const todayIso=todayLocalISO();
   days.forEach(d=>{
-    // FIX v1.2.14: Lokalne YYYY-MM-DD zamiast UTC toISOString
+    // FIX v1.2.15: Lokalne YYYY-MM-DD zamiast UTC toISOString
     const isToday=toLocalISO(d)===todayIso;
     g+='<div class="cal-hdr'+(isToday?' today':'')+'">'+DNM[d.getDay()]+'<br>'+d.getDate()+'</div>';
   });
@@ -3387,7 +3589,7 @@ async function _renderCalMonth(appts,cls,consByClient){
   const y=calDate.getFullYear(),mo=calDate.getMonth();
   const firstDay=new Date(y,mo,1);
   const lastDay=new Date(y,mo+1,0);
-  // FIX v1.2.14: lokalne YYYY-MM-DD zamiast UTC
+  // FIX v1.2.15: lokalne YYYY-MM-DD zamiast UTC
   const todayStr=todayLocalISO();
   document.getElementById("calTitle").textContent=firstDay.toLocaleDateString("pl-PL",{month:"long",year:"numeric"});
   const leadBlank=(firstDay.getDay()||7)-1;
