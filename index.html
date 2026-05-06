@@ -573,7 +573,7 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
   </div>
   <h1>Gabinet Kosmetologiczny<br><span class="hdr-name">Magda Mączyńska</span></h1>
   <p class="hdr-tag"><em>Profesjonalne zabiegi na ciało i twarz</em></p>
-  <p class="hdr-info">ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.14</span></p>
+  <p class="hdr-info">ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.13</span></p>
 </div>
 <div class="wrap">
 
@@ -1672,73 +1672,31 @@ async function installApp(){
   if(outcome==="accepted"){toast("Aplikacja zainstalowana ✓");document.getElementById("installBanner").classList.remove("on");}
   deferredInstallPrompt=null;
 }
-// ===== SERVICE WORKER — REGISTRACJA Z PLIKU sw.js =====
-// FIX v1.2.14 (krytyczny): Wcześniej tutaj był INLINE BLOB SW który tworzył pętlę self-update:
-//   1. każde ładowanie strony rejestrowało NOWY blob SW z `CV=Date.now()` (różny CV każdorazowo)
-//   2. blob SW przy activate czyścił wszystkie cache
-//   3. konflikt z drugim SW (sw.js z repo) — dwa SW walczyły o controlled clients
-//   4. GitHub Pages cache + ten chaos = strona się nie ładowała / zmiany się nie pokazywały
-// Naprawa: rejestrujemy tylko jeden SW (sw.js z repo, dobrze przemyślany).
-// Aktualizacje wersji są kontrolowane przez CACHE_VERSION w sw.js.
-
+// ===== SERVICE WORKER — INLINE (nie wymaga zewnętrznego sw.js) =====
 if('serviceWorker' in navigator){
-  window.addEventListener('load',async()=>{
+  window.addEventListener('load',()=>{
+    // Krok 1: Usuń wszystkie stare SW — to naprawia "zmiany nie są nanoszone" na GitHub Pages
+    navigator.serviceWorker.getRegistrations().then(regs=>{
+      regs.forEach(r=>r.unregister().then(()=>console.log('[SW] Odrejestrowano stary SW:',r.scope)));
+    });
+    // Krok 2: Zarejestruj inline SW z network-first (zawsze pobiera świeże zasoby gdy online)
+    const CV='mm-v'+Date.now().toString(36).slice(-6);
+    const swCode=`const CV='${CV}';
+self.addEventListener('install',()=>self.skipWaiting());
+self.addEventListener('activate',e=>{
+  e.waitUntil(caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))));
+  self.clients.claim();
+});
+self.addEventListener('fetch',e=>{
+  if(e.request.method!=='GET')return;
+  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+});`;
     try{
-      // Krok 1 (jednorazowy emergency cleanup): wykryj i usuń stare blob SW z poprzednich wersji.
-      // Blob SW mają scriptURL zaczynające się od "blob:" — łatwo je rozpoznać i unregisterować.
-      const regs=await navigator.serviceWorker.getRegistrations();
-      let cleanedBlobSW=false;
-      for(const reg of regs){
-        const scriptURL=reg.active?.scriptURL||reg.installing?.scriptURL||reg.waiting?.scriptURL||"";
-        if(scriptURL.startsWith("blob:")||scriptURL.includes("createObjectURL")){
-          await reg.unregister();
-          cleanedBlobSW=true;
-          console.log("[SW] Cleanup: usunięto stary blob SW",scriptURL);
-        }
-      }
-      // Jeśli usunęliśmy blob SW, wyczyść wszystkie cache które mogły zostać zaśmiecone
-      if(cleanedBlobSW){
-        const cacheKeys=await caches.keys();
-        await Promise.all(cacheKeys.map(k=>caches.delete(k)));
-        console.log("[SW] Cleanup: wyczyszczono",cacheKeys.length,"starych cache");
-      }
-
-      // Krok 2: zarejestruj właściwy SW z pliku
-      const reg=await navigator.serviceWorker.register("./sw.js",{scope:"./"});
-      console.log("[SW] OK, scope:",reg.scope);
-
-      // Krok 3: nasłuchuj nowych wersji — gdy SW znajdzie aktualizację, prompt użytkownika
-      reg.addEventListener("updatefound",()=>{
-        const newSW=reg.installing;
-        if(!newSW)return;
-        newSW.addEventListener("statechange",()=>{
-          if(newSW.state==="installed"&&navigator.serviceWorker.controller){
-            // Nowa wersja gotowa, stara wciąż kontroluje stronę
-            // Subtelny toast — kosmetolog może odświeżyć w wygodnym momencie
-            if(typeof toast==="function"){
-              toast("🆕 Dostępna nowa wersja aplikacji — odśwież stronę",6000);
-            }
-          }
-        });
-      });
-
-      // Krok 4: gdy SW przejmie kontrolę (po skipWaiting), reload tylko PIERWSZY raz w sesji
-      // żeby uniknąć pętli reloadów
-      let reloaded=false;
-      navigator.serviceWorker.addEventListener("controllerchange",()=>{
-        if(reloaded)return;
-        reloaded=true;
-        // Czekamy chwilę żeby SW miał szansę zacache'ować nowe pliki
-        // a potem reload — ale TYLKO jeśli to nie jest pierwsza instalacja (controller miał wartość)
-      });
-
-      // Krok 5: sprawdź aktualizację co 30 min jeśli aplikacja jest otwarta długo
-      setInterval(()=>{reg.update().catch(()=>{});},30*60*1000);
-
-    }catch(err){
-      console.warn("[SW] Rejestracja nie powiodła się:",err.message);
-      // Aplikacja działa bez SW — degradacja graceful
-    }
+      const blob=new Blob([swCode],{type:'application/javascript'});
+      navigator.serviceWorker.register(URL.createObjectURL(blob),{scope:'./'})
+        .then(r=>console.log('[SW] Inline SW OK:',r.scope))
+        .catch(e=>console.log('[SW] Blob URL nie obsługiwany (OK na GitHub Pages):',e.message));
+    }catch(e){console.log('[SW] Pominięto:',e);}
   });
 }
 
@@ -3252,7 +3210,7 @@ function saveToDB(data){return new Promise(resolve=>{const tx=db.transaction(["c
 // ===== CALENDAR (15-min) =====
 const HRS={1:[8,18],2:[8,18],3:[8,18],4:[8,18],5:[8,18],6:[9,15],0:null};
 const DNM=["Nd","Pn","Wt","Śr","Cz","Pt","Sb"];
-// FIX v1.2.14: Konwersja Date → "YYYY-MM-DD" w STREFIE LOKALNEJ.
+// FIX v1.2.13: Konwersja Date → "YYYY-MM-DD" w STREFIE LOKALNEJ.
 // Wcześniej `d.toISOString().substring(0,10)` używał UTC — w Polsce w czasie letniem
 // daty mogą być przesunięte o 1 dzień (np. 5.05 lokalnie = 4.05 UTC po 22:00). To powodowało
 // błędne podświetlanie "dzisiejszego" dnia w kalendarzu. Tutaj zawsze lokalna strefa czasowa.
@@ -3305,7 +3263,7 @@ async function _renderCalWeek(appts,cls,consByClient){
   let g='<div class="cal-grid"><div class="cal-hdr"></div>';
   const todayIso=todayLocalISO();
   days.forEach(d=>{
-    // FIX v1.2.14: Lokalne YYYY-MM-DD zamiast UTC toISOString
+    // FIX v1.2.13: Lokalne YYYY-MM-DD zamiast UTC toISOString
     const isToday=toLocalISO(d)===todayIso;
     g+='<div class="cal-hdr'+(isToday?' today':'')+'">'+DNM[d.getDay()]+'<br>'+d.getDate()+'</div>';
   });
@@ -3387,7 +3345,7 @@ async function _renderCalMonth(appts,cls,consByClient){
   const y=calDate.getFullYear(),mo=calDate.getMonth();
   const firstDay=new Date(y,mo,1);
   const lastDay=new Date(y,mo+1,0);
-  // FIX v1.2.14: lokalne YYYY-MM-DD zamiast UTC
+  // FIX v1.2.13: lokalne YYYY-MM-DD zamiast UTC
   const todayStr=todayLocalISO();
   document.getElementById("calTitle").textContent=firstDay.toLocaleDateString("pl-PL",{month:"long",year:"numeric"});
   const leadBlank=(firstDay.getDay()||7)-1;
