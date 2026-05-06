@@ -1,7 +1,7 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.13  |  2026-04-26
- *  Zmiany v1.2.13 (Sprzedaż + UX):
+ *  Wersja: 1.2.14  |  2026-04-26
+ *  Zmiany v1.2.14 (Sprzedaż + UX):
  *   • NOWY widok 🛍 Sprzedaż produktów (POS) — oddzielny od panelu zabiegowego
  *     - Wybór klienta z bazy (autocomplete) lub sprzedaż bez przypisania
  *     - Picker produktów retail z magazynu (kategorie, wyszukiwarka, stan)
@@ -22,7 +22,7 @@
 
 "use strict";
 
-const CACHE_VERSION = "v1.2.13";
+const CACHE_VERSION = "v1.2.14";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
@@ -174,15 +174,47 @@ self.addEventListener("fetch", (event) => {
 
 async function handleSameOrigin(req) {
   const cache = await caches.open(CACHE);
+
+  // FIX v1.2.14: HTML i index.html — NETWORK-FIRST z fallbackiem do cache.
+  // Powód: zwykły cache-first oznaczał że po deployment nowej wersji aplikacja
+  // pokazywała stary index.html aż do następnego activate (czasem dni). Teraz:
+  //   • online — zawsze świeży HTML z sieci, w tle aktualizujemy cache
+  //   • offline — cache fallback (stara wersja lepsza niż "Brak internetu")
+  // Inne zasoby (JS, CSS, ikony) zostają na cache-first bo są wersjonowane
+  // przez CACHE_VERSION (zmiana w sw.js wymusza pobranie wszystkiego od nowa).
+  const isHTML = req.mode === "navigate"
+              || req.destination === "document"
+              || req.url.endsWith(".html")
+              || req.url.endsWith("/");
+
+  if (isHTML) {
+    try {
+      const fresh = await fetch(req);
+      if (isCacheableResponse(fresh)) {
+        cache.put(req, fresh.clone());
+      }
+      return fresh;
+    } catch (_) {
+      // offline — wracamy do cache
+      const cached = await cache.match(req)
+                  || await cache.match("./index.html")
+                  || await cache.match("./");
+      if (cached) return cached;
+      return new Response("Offline — brak zasobu w cache", {
+        status: 504,
+        statusText: "Offline"
+      });
+    }
+  }
+
+  // Pozostałe zasoby (JS, CSS, ikony, manifest) — cache-first z tłem-revalidate.
   const cached = await cache.match(req);
 
   if (cached) {
-    // Oddaj z cache natychmiast, w tle odśwież
     fetchAndUpdate(cache, req).catch(() => {});
     return cached;
   }
 
-  // Pierwszy raz — pobierz i zapisz
   try {
     const res = await fetch(req);
     if (isCacheableResponse(res)) {
@@ -190,7 +222,6 @@ async function handleSameOrigin(req) {
     }
     return res;
   } catch (err) {
-    // Offline fallback: dla nawigacji (HTML) zwróć index.html z cache
     if (req.mode === "navigate" || req.destination === "document") {
       const fallback = await cache.match("./index.html") || await cache.match("./");
       if (fallback) return fallback;
