@@ -573,7 +573,7 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
   </div>
   <h1>Gabinet Kosmetologiczny<br><span class="hdr-name">Magda Mączyńska</span></h1>
   <p class="hdr-tag"><em>Profesjonalne zabiegi na ciało i twarz</em></p>
-  <p class="hdr-info">ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.15</span></p>
+  <p class="hdr-info">ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.16</span></p>
 </div>
 <div class="wrap">
 
@@ -1673,7 +1673,7 @@ async function installApp(){
   deferredInstallPrompt=null;
 }
 // ===== SERVICE WORKER — REGISTRACJA Z PLIKU sw.js =====
-// FIX v1.2.15 (krytyczny): Wcześniej tutaj był INLINE BLOB SW który tworzył pętlę self-update:
+// FIX v1.2.16 (krytyczny): Wcześniej tutaj był INLINE BLOB SW który tworzył pętlę self-update:
 //   1. każde ładowanie strony rejestrowało NOWY blob SW z `CV=Date.now()` (różny CV każdorazowo)
 //   2. blob SW przy activate czyścił wszystkie cache
 //   3. konflikt z drugim SW (sw.js z repo) — dwa SW walczyły o controlled clients
@@ -2341,7 +2341,7 @@ function renderForm(){
      '<span style="color:var(--t2);font-size:9px">📍 Zdjęcia mogą być oglądane przez nieograniczoną liczbę osób w internecie. Wycofanie zgody w każdej chwili: kosmetolog.maczynska@gmail.com.</span>'+
      '</span></span></label>';
   h+='</div>';
-  // FIX v1.2.15 (audyt prawny): Sekcja oświadczeń klienta — KLUCZOWA prawnie.
+  // FIX v1.2.16 (audyt prawny): Sekcja oświadczeń klienta — KLUCZOWA prawnie.
   // Ukrywana dla zgód administracyjnych (zgoda_rodo, zgoda_foto) bo nie dotyczą zabiegu.
   // Spełnia wymagania:
   //  • art. 4 ustawy o działalności leczniczej (świadoma zgoda pacjenta)
@@ -2351,27 +2351,33 @@ function renderForm(){
   //    jeśli klient pisemnie potwierdził że został poinformowany)
   if(!_isAdministrativeConsent(cur?.id)){
     h+='<div class="cd" id="cdOswiadczenia" style="border-left:4px solid var(--g)"><div class="ct">⚖ Świadome oświadczenia klienta <span class="rq">*</span></div>';
-    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswInfo" data-rq><span>'+
+    // FIX v1.2.16: Master checkbox — jeden klik zaznacza wszystkie 5. Klient może też pojedynczo
+    // odznaczyć któreś jeśli się nie zgadza. Plus banner pre-fill jeśli z historii klienta wynika
+    // że już raz zatwierdził te oświadczenia (renderowany przez applyExistingConsents).
+    h+='<div id="oswPrevBanner" style="display:none"></div>';
+    h+='<label class="cc" style="background:linear-gradient(135deg,var(--sb),var(--bg2));border-radius:var(--rs);padding:12px;margin-bottom:10px;border:2px solid var(--sc)"><input type="checkbox" id="chkOswAll" onchange="_toggleAllOsw(this.checked)"><span><strong style="color:var(--sc)">✅ Oświadczam wszystkie poniższe (1-5)</strong><br>'+
+       '<span style="font:300 10px var(--fb);color:var(--t2);display:block;margin-top:3px">Jeden klik zaznacza wszystkie 5 oświadczeń. Możesz pojedynczo odznaczyć któreś jeśli się nie zgadza.</span></span></label>';
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswInfo" data-rq onchange="_updateMasterOsw()"><span>'+
        '<strong>1. Zostałem(am) poinformowany(a) o przebiegu zabiegu, jego efektach i ryzyku.</strong><br>'+
        '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
        'Otrzymałem(am) od kosmetologa pełną informację dotyczącą: charakteru zabiegu, jego przebiegu, oczekiwanych efektów, możliwych powikłań i działań niepożądanych, alternatywnych metod leczenia oraz konsekwencji niepoddania się zabiegowi. Miałem(am) możliwość zadania pytań i otrzymałem(am) na nie wyczerpujące odpowiedzi.'+
        '</span></span></label>';
-    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswPrawda" data-rq><span>'+
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswPrawda" data-rq onchange="_updateMasterOsw()"><span>'+
        '<strong>2. Oświadczam, że udzielone przeze mnie odpowiedzi są zgodne z prawdą.</strong><br>'+
        '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
        'Wszystkie informacje dotyczące mojego stanu zdrowia, przyjmowanych leków, chorób przewlekłych, alergii oraz przebytych zabiegów podałem(am) zgodnie ze stanem faktycznym. Rozumiem, że <strong>zatajenie istotnych informacji może skutkować poważnymi powikłaniami zdrowotnymi</strong> — odpowiedzialność za skutki takich zatajeń ponoszę osobiście.'+
        '</span></span></label>';
-    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswRyzyko" data-rq><span>'+
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswRyzyko" data-rq onchange="_updateMasterOsw()"><span>'+
        '<strong>3. Akceptuję ryzyko związane z zabiegiem.</strong><br>'+
        '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
        'Rozumiem, że żaden zabieg kosmetologiczny nie gwarantuje 100% oczekiwanego efektu — efekty są <strong>indywidualne</strong> i zależne od fizjologii skóry, stylu życia, stosowania zaleceń pozabiegowych. Akceptuję możliwość wystąpienia działań niepożądanych opisanych w sekcji "Możliwe reakcje" oraz fakt, że nie stanowią one powikłania zabiegu, lecz naturalną reakcję organizmu.'+
        '</span></span></label>';
-    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswOdstap" data-rq><span>'+
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px;margin-bottom:6px"><input type="checkbox" id="chkOswOdstap" data-rq onchange="_updateMasterOsw()"><span>'+
        '<strong>4. Mam prawo odstąpić od zabiegu w dowolnym momencie.</strong><br>'+
        '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
        'Zostałem(am) poinformowany(a), że mogę przerwać zabieg na każdym etapie bez podania przyczyny. Niniejsza zgoda może zostać przeze mnie wycofana w każdej chwili — wycofanie nie wpływa na zgodność z prawem przetwarzania danych przed jej cofnięciem (art. 7 ust. 3 RODO).'+
        '</span></span></label>';
-    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px"><input type="checkbox" id="chkOswZalec" data-rq><span>'+
+    h+='<label class="cc" style="background:var(--bg2);border-radius:var(--rs);padding:10px"><input type="checkbox" id="chkOswZalec" data-rq onchange="_updateMasterOsw()"><span>'+
        '<strong>5. Zobowiązuję się do przestrzegania zaleceń pozabiegowych.</strong><br>'+
        '<span style="font:400 10px var(--fb);color:var(--t);display:block;margin-top:4px;line-height:1.5">'+
        'Zapoznałem(am) się z zaleceniami i zakazami pozabiegowymi opisanymi powyżej. Rozumiem, że nieprzestrzeganie zaleceń może skutkować obniżeniem efektu zabiegu lub powikłaniami, za które kosmetolog nie ponosi odpowiedzialności.'+
@@ -2511,6 +2517,8 @@ async function applyExistingConsents(cid){
   const cons=await dbGetAll("consents");
   const clientCons=cons.filter(co=>co.clientId===cid);
   if(!clientCons.length)return; // pierwsza zgoda → standardowy flow
+  // FIX v1.2.16: Pre-fill 5 oświadczeń jeśli klient już je raz wszystkie zatwierdził
+  await _applyPreviousOswiadczenia(cid,cur?.id);
   // Aggreguj historyczne wybory (kiedykolwiek był TRUE = klient wyraził)
   const has={
     marketing:clientCons.some(co=>co.marketing),
@@ -2612,7 +2620,7 @@ function validate(){
 }
 async function sha256(m){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(m));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");}
 
-// FIX v1.2.15: Pełny stempel prawny (legal evidence package) zgody.
+// FIX v1.2.16: Pełny stempel prawny (legal evidence package) zgody.
 // Spełnia wymagania:
 //  • RODO art. 7 ust. 1 — administrator musi być w stanie wykazać że zgoda była udzielona
 //  • RODO art. 9 ust. 2 lit. a — wyraźna zgoda na dane medyczne (szczególna kategoria)
@@ -2678,7 +2686,7 @@ async function buildLegalStamp(consentData,treatmentData,signaturePngB64){
     // Identyfikatory dokumentu
     uuid,
     documentVersion:"1.2.15",
-    appVersion:"v1.2.15",
+    appVersion:"v1.2.16",
     // Czas
     ts:tsISO,                           // pełny timestamp ISO 8601 UTC
     tsLocal,                            // czytelnie po polsku
@@ -2712,10 +2720,57 @@ function _fallbackUUID(){
   });
 }
 
+// FIX v1.2.16: Master checkbox dla 5 oświadczeń klienta — toggle all/none jednym klikiem.
+// Klient nadal może pojedynczo odznaczyć któreś — _updateMasterOsw synchronizuje stan master.
+function _toggleAllOsw(checked){
+  ["chkOswInfo","chkOswPrawda","chkOswRyzyko","chkOswOdstap","chkOswZalec"].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.checked=checked;
+  });
+}
+
+function _updateMasterOsw(){
+  const ids=["chkOswInfo","chkOswPrawda","chkOswRyzyko","chkOswOdstap","chkOswZalec"];
+  const all=ids.every(id=>document.getElementById(id)?.checked);
+  const master=document.getElementById("chkOswAll");
+  if(master)master.checked=all;
+}
+
+// FIX v1.2.16: Pre-fill oświadczeń z poprzedniej zgody klienta na ten sam zabieg.
+// Wywoływane z applyExistingConsents (które już sprawdza historię klienta dla RODO/marketing/wizerunku).
+// Logika: jeśli klient już raz zaznaczył wszystkie 5 oświadczeń → pre-zaznacz je teraz +
+// pokaż banner "Wcześniej zatwierdzono" + master checkbox jest aktywny.
+async function _applyPreviousOswiadczenia(cid,treatmentId){
+  if(!cid)return;
+  const cons=await dbGetAll("consents");
+  // Szukaj ostatniej zgody tego klienta z wszystkimi 5 oświadczeniami zaznaczonymi
+  const lastWithAll=cons.filter(c=>c.clientId===cid&&c.oswiadczenia&&
+    c.oswiadczenia.poinformowany&&c.oswiadczenia.prawda&&c.oswiadczenia.ryzyko&&
+    c.oswiadczenia.odstap&&c.oswiadczenia.zalecenia)
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
+  if(!lastWithAll)return;
+  // Sprawdź czy elementy DOM są w aktualnej zgodzie (mogą nie być dla zgód admin)
+  const ids=["chkOswInfo","chkOswPrawda","chkOswRyzyko","chkOswOdstap","chkOswZalec"];
+  if(!ids.every(id=>document.getElementById(id)))return;
+  // Pre-zaznacz wszystkie
+  ids.forEach(id=>{const el=document.getElementById(id);if(el)el.checked=true;});
+  const master=document.getElementById("chkOswAll");if(master)master.checked=true;
+  // Banner wyjaśniający
+  const banner=document.getElementById("oswPrevBanner");
+  if(banner){
+    const sameTreatment=lastWithAll.treatmentId===treatmentId;
+    banner.style.display="block";
+    banner.innerHTML='<div style="background:var(--wb);border-left:3px solid var(--wn);padding:10px 12px;border-radius:var(--rs);margin-bottom:10px;font:400 11px var(--fb)">'+
+      '<strong>ℹ️ Pre-zaznaczono na podstawie poprzedniej zgody</strong> ('+esc(lastWithAll.date||"-")+(sameTreatment?", ten sam zabieg":", inny zabieg")+').<br>'+
+      '<span style="font:300 10px var(--fb);color:var(--t2)">Klient: <strong>upewnij się że oświadczenia nadal są aktualne</strong>. Możesz odznaczyć te które się zmieniły.</span>'+
+      '</div>';
+  }
+}
+
 async function clientSave(){
   if(!validate()||!cur)return;
   const d=gatherData();
-  // FIX v1.2.15: Pełny stempel prawny zamiast prostego hash z timestampem.
+  // FIX v1.2.16: Pełny stempel prawny zamiast prostego hash z timestampem.
   // Zawiera UUID, IP, hash całego dokumentu, łańcuch hash, metadane prawne.
   // Spełnia wymagania RODO art. 7 (wykazywalność zgody) + art. 77² KC (forma dokumentowa).
   // UWAGA: ipify.org request może trwać do 3s offline timeout — dlatego asynchronicznie.
@@ -3325,7 +3380,7 @@ function gatherData(){
   const checks={};document.querySelectorAll(".ci[data-val]").forEach(ci=>{checks[ci.querySelector(".cl")?.textContent||""]=ci.dataset.val;});
   const subtypes=[];document.querySelectorAll('input[name="subtype"]:checked').forEach(cb=>subtypes.push(cb.value));
   const extras={};document.querySelectorAll(".exF").forEach(ef=>{extras[ef.dataset.l]=ef.value;});
-  // FIX v1.2.15: Zbieramy 5 oświadczeń klienta — kluczowe prawnie. Wszystkie 5 muszą być TRUE
+  // FIX v1.2.16: Zbieramy 5 oświadczeń klienta — kluczowe prawnie. Wszystkie 5 muszą być TRUE
   // dla zgody na zabieg (validate() to sprawdza przez data-rq). Dla zgód admin (RODO/foto)
   // sekcja oświadczeń nie jest renderowana, więc te pola będą `false` — to OK.
   const oswiadczenia={
@@ -3371,7 +3426,7 @@ async function autoPDF(label){
     const PAGE_USABLE=PH-2*MARGIN-12;                  // -12mm dla legal footer
     const PAGE_OVERLAP_MM=8;                            // overlap między stronami
     const pdf=new jsPDF("p","mm","a4");
-    // FIX v1.2.15: Metadane PDF/A-light — wzmacniają wiarygodność dokumentu.
+    // FIX v1.2.16: Metadane PDF/A-light — wzmacniają wiarygodność dokumentu.
     // Pełny PDF/A-1b wymaga osadzenia czcionek + ICC profile + XMP — niemożliwe w jsPDF
     // browser-side. Dla 95% przypadków prawnych ten metadata-set wystarczy.
     // Przy formalnym audicie / kontroli RODO można potem przekonwertować PDF do PDF/A-1b
@@ -3388,7 +3443,7 @@ async function autoPDF(label){
         subject:"Forma dokumentowa wg art. 77² KC. Zgoda RODO art. 7. UUID: "+(stamp.uuid||"-"),
         author:"Gabinet Kosmetologiczny Magda Mączyńska",
         keywords:"zgoda,RODO,kosmetologia,formularz,"+treatmentName+","+(stamp.uuid||""),
-        creator:"Gabinet MM "+(stamp.appVersion||"v1.2.15"),
+        creator:"Gabinet MM "+(stamp.appVersion||"v1.2.16"),
         producer:"jsPDF + Gabinet MM",
         creationDate:stamp.ts?new Date(stamp.ts):new Date()
       });
@@ -3421,12 +3476,18 @@ async function autoPDF(label){
         pdf.text("UUID: "+stamp.uuid,MARGIN+1,PH-10);
         pdf.text("HASH: "+(stamp.docHash||"").substring(0,32)+"...",MARGIN+1,PH-7);
       }
-      // Prawa strona: timestamp + numer strony
-      if(stamp.tsLocal){
-        pdf.text(stamp.tsLocal.substring(0,30),PW-MARGIN-1,PH-10,{align:"right"});
+      // FIX v1.2.16: jsPDF default helvetica nie obsługuje polskich diakrytyków w right-aligned text.
+      // Strip polskich znaków ze stopki — to dane techniczne, nie content. Plus krótszy ISO timestamp
+      // bez ryzyka łamania.
+      const stripDia=s=>(s||"").replace(/[ąćęłńóśźż]/g,c=>({ą:"a",ć:"c",ę:"e",ł:"l",ń:"n",ó:"o",ś:"s",ź:"z",ż:"z"})[c]||c).replace(/[ĄĆĘŁŃÓŚŹŻ]/g,c=>({Ą:"A",Ć:"C",Ę:"E",Ł:"L",Ń:"N",Ó:"O",Ś:"S",Ź:"Z",Ż:"Z"})[c]||c);
+      // Prawa strona: timestamp ISO (zawsze ASCII, bezpieczny dla każdej czcionki)
+      if(stamp.ts){
+        // Użyj ISO timestamp obciętego do "YYYY-MM-DD HH:MM" — krótki i czytelny
+        const isoShort=stamp.ts.replace("T"," ").substring(0,16)+" UTC";
+        pdf.text(isoShort,PW-MARGIN-1,PH-10,{align:"right"});
       }
-      pdf.text("Strona "+pageNum+" / "+totalPages+" · "+(stamp.appVersion||"v1.2.15"),PW-MARGIN-1,PH-7,{align:"right"});
-      pdf.text("Forma dokumentowa wg art. 77² KC · zgoda RODO art. 7",PW/2,PH-3,{align:"center"});
+      pdf.text("Strona "+pageNum+" / "+totalPages+" · "+stripDia(stamp.appVersion||"v1.2.16"),PW-MARGIN-1,PH-7,{align:"right"});
+      pdf.text(stripDia("Forma dokumentowa wg art. 77 KC · zgoda RODO art. 7"),PW/2,PH-3,{align:"center"});
       pdf.setTextColor(0);
       const consumed=pH-(rem>PAGE_USABLE?PAGE_OVERLAP_MM:0);
       mmConsumed+=consumed;
@@ -3454,7 +3515,7 @@ function saveToDB(data){return new Promise(resolve=>{const tx=db.transaction(["c
 // ===== CALENDAR (15-min) =====
 const HRS={1:[8,18],2:[8,18],3:[8,18],4:[8,18],5:[8,18],6:[9,15],0:null};
 const DNM=["Nd","Pn","Wt","Śr","Cz","Pt","Sb"];
-// FIX v1.2.15: Konwersja Date → "YYYY-MM-DD" w STREFIE LOKALNEJ.
+// FIX v1.2.16: Konwersja Date → "YYYY-MM-DD" w STREFIE LOKALNEJ.
 // Wcześniej `d.toISOString().substring(0,10)` używał UTC — w Polsce w czasie letniem
 // daty mogą być przesunięte o 1 dzień (np. 5.05 lokalnie = 4.05 UTC po 22:00). To powodowało
 // błędne podświetlanie "dzisiejszego" dnia w kalendarzu. Tutaj zawsze lokalna strefa czasowa.
@@ -3507,7 +3568,7 @@ async function _renderCalWeek(appts,cls,consByClient){
   let g='<div class="cal-grid"><div class="cal-hdr"></div>';
   const todayIso=todayLocalISO();
   days.forEach(d=>{
-    // FIX v1.2.15: Lokalne YYYY-MM-DD zamiast UTC toISOString
+    // FIX v1.2.16: Lokalne YYYY-MM-DD zamiast UTC toISOString
     const isToday=toLocalISO(d)===todayIso;
     g+='<div class="cal-hdr'+(isToday?' today':'')+'">'+DNM[d.getDay()]+'<br>'+d.getDate()+'</div>';
   });
@@ -3589,7 +3650,7 @@ async function _renderCalMonth(appts,cls,consByClient){
   const y=calDate.getFullYear(),mo=calDate.getMonth();
   const firstDay=new Date(y,mo,1);
   const lastDay=new Date(y,mo+1,0);
-  // FIX v1.2.15: lokalne YYYY-MM-DD zamiast UTC
+  // FIX v1.2.16: lokalne YYYY-MM-DD zamiast UTC
   const todayStr=todayLocalISO();
   document.getElementById("calTitle").textContent=firstDay.toLocaleDateString("pl-PL",{month:"long",year:"numeric"});
   const leadBlank=(firstDay.getDay()||7)-1;
