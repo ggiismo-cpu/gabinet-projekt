@@ -18,12 +18,166 @@
 <title>Gabinet MM — System Zgód v5</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
-:root{--bg:#FAFAF7;--bg2:#F0EDE8;--c:#fff;--t:#1E1B18;--t2:#7A7167;--g:#A0845C;--g2:#C8AD82;--g3:#EDE2D0;--dn:#BF4A2B;--db:#FEF0EC;--sc:#3D8B63;--sb:#EEF7F1;--wn:#C68B1E;--wb:#FFF9EC;--bd:#E4DDD4;--sh:0 1px 8px rgba(30,27,24,.06);--r:10px;--rs:7px;--fd:'Playfair Display',Georgia,serif;--fb:'Outfit',sans-serif}
+:root{
+  /* Paleta premium — inspiracja: identyfikacja gabinetu Magda Mączyńska
+     (złoty monogram, kremowa biel, eleganckie czarne typo). */
+  --bg:#F8F5EF;          /* tło — kremowa biel (cieplejsza niż FAFAF7) */
+  --bg2:#EFE9DD;         /* drugi plan kart */
+  --c:#FFFFFF;           /* białe karty */
+  --t:#1A1614;           /* tekst — głęboka czerń */
+  --t2:#857A6C;          /* tekst pomocniczy */
+  --g:#B8965A;           /* złoty główny — logo Magdy */
+  --g2:#D4B782;          /* złoty jasny */
+  --g3:#F0E6D1;          /* złoty pastelowy */
+  --gd:#8C6F3D;          /* złoty ciemny — hover/active */
+  --dn:#BF4A2B;          /* czerwony alert */
+  --db:#FEF0EC;
+  --sc:#3D7A56;          /* zielony sukces — głębszy, mniej krzykliwy */
+  --sb:#EEF5EE;
+  --wn:#B8862F;          /* żółty ostrzegawczy — w zharmonizowany ze złotem */
+  --wb:#FAF3E0;
+  --ac:#7A5BA8;          /* fioletowy akcent — dla "specjalnych" przycisków (rzadko) */
+  --bd:#DBD3C5;          /* obramowanie */
+  --sh:0 2px 12px rgba(184,150,90,.08);  /* złotawy cień */
+  --shHi:0 4px 20px rgba(184,150,90,.18);
+  --r:12px;
+  --rs:8px;
+  --fd:'Playfair Display',Georgia,serif;
+  --fb:'Outfit',sans-serif;
+  /* Logo gradient — używany w SVG inline */
+  --logoGrad:linear-gradient(135deg,#D4B782 0%,#B8965A 50%,#8C6F3D 100%);
+}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:var(--fb);background:var(--bg);color:var(--t);line-height:1.55;min-height:100vh;-webkit-tap-highlight-color:transparent}
-.nav{background:var(--t);padding:7px 10px;display:flex;justify-content:center;gap:5px;flex-wrap:wrap;position:sticky;top:0;z-index:100}.nav button{background:0;border:1.5px solid var(--g2);color:var(--g3);padding:6px 14px;border-radius:40px;font:600 11px var(--fb);cursor:pointer;transition:.2s;white-space:nowrap}.nav button:hover,.nav button.on{background:var(--g);border-color:var(--g);color:#fff}
-.hdr{text-align:center;padding:20px 14px 12px;background:linear-gradient(180deg,var(--bg2),var(--bg))}.hdr h1{font:700 22px/1.2 var(--fd)}.hdr p{font:300 12px var(--fb);color:var(--t2);margin-top:2px}
-.wrap{max-width:840px;margin:0 auto;padding:0 10px 40px}.vw{display:none}.vw.on{display:block}
-.cd{background:var(--c);border-radius:var(--r);box-shadow:var(--sh);padding:20px;margin-bottom:12px;border:1px solid var(--bd)}.ct{font:600 11px var(--fb);text-transform:uppercase;letter-spacing:1.2px;color:var(--g);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+/* Premium nawigacja — czarne tło z złotymi akcentami i nadkresnem */
+.nav{
+  background:linear-gradient(180deg,#1A1614 0%,#2A2520 100%);
+  padding:10px 12px;
+  display:flex;
+  justify-content:center;
+  gap:6px;
+  flex-wrap:wrap;
+  position:sticky;
+  top:0;
+  z-index:100;
+  border-bottom:2px solid var(--g);
+  box-shadow:0 2px 12px rgba(0,0,0,.15);
+}
+.nav button{
+  background:transparent;
+  border:1.5px solid var(--g2);
+  color:var(--g3);
+  padding:7px 16px;
+  border-radius:40px;
+  font:600 11px var(--fb);
+  letter-spacing:.3px;
+  cursor:pointer;
+  transition:all .25s ease;
+  white-space:nowrap;
+}
+.nav button:hover{
+  background:rgba(184,150,90,.18);
+  border-color:var(--g);
+  color:#fff;
+}
+.nav button.on{
+  background:var(--logoGrad);
+  border-color:var(--g);
+  color:#fff;
+  box-shadow:0 2px 8px rgba(184,150,90,.4);
+}
+/* Premium nagłówek — pełna prezentacja marki */
+.hdr{
+  text-align:center;
+  padding:32px 14px 24px;
+  background:radial-gradient(ellipse at top,var(--g3) 0%,var(--bg) 70%);
+  border-bottom:1px solid var(--bd);
+  position:relative;
+}
+.hdr::after{
+  /* złota linia dekoracyjna pod nagłówkiem */
+  content:"";
+  display:block;
+  position:absolute;
+  left:50%;bottom:-1px;
+  transform:translateX(-50%);
+  width:80px;height:2px;
+  background:var(--logoGrad);
+}
+.hdr-monogram{
+  display:flex;justify-content:center;align-items:center;
+  margin-bottom:8px;
+}
+.hdr-monogram svg{
+  width:96px;height:auto;
+  filter:drop-shadow(0 3px 6px rgba(184,150,90,.3));
+}
+.hdr h1{
+  font:600 22px/1.25 var(--fd);
+  color:var(--t);
+  letter-spacing:.5px;
+  text-transform:uppercase;
+  margin-bottom:2px;
+}
+.hdr-name{
+  font:700 26px/1.1 var(--fd);
+  color:var(--gd);
+  text-transform:none;
+  letter-spacing:.3px;
+  display:block;
+  margin-top:2px;
+}
+.hdr-tag{
+  font:400 italic 14px var(--fd);
+  color:var(--g);
+  margin:8px 0 4px;
+  letter-spacing:.3px;
+}
+.hdr-info{
+  font:300 11px var(--fb);
+  color:var(--t2);
+  margin-top:4px;
+  letter-spacing:.3px;
+}
+.hdr p{font:300 12px var(--fb);color:var(--t2);margin-top:2px}
+.wrap{max-width:840px;margin:0 auto;padding:0 10px 40px}
+.vw{display:none}
+.vw.on{
+  display:block;
+  animation:fadeInUp .35s ease-out;
+}
+@keyframes fadeInUp{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+/* Premium karty — subtelny złoty akcent w nagłówku, miękki cień */
+.cd{
+  background:var(--c);
+  border-radius:var(--r);
+  box-shadow:var(--sh);
+  padding:22px;
+  margin-bottom:14px;
+  border:1px solid var(--bd);
+  transition:box-shadow .25s ease;
+}
+.cd:hover{box-shadow:var(--shHi)}
+.ct{
+  font:600 11px var(--fb);
+  text-transform:uppercase;
+  letter-spacing:1.4px;
+  color:var(--g);
+  margin-bottom:12px;
+  padding-bottom:8px;
+  border-bottom:1px solid var(--bd);
+  position:relative;
+}
+.ct::after{
+  /* złoty mini-marker pod tytułem karty */
+  content:"";
+  position:absolute;
+  left:0;bottom:-1px;
+  width:32px;height:2px;
+  background:var(--logoGrad);
+}
 .fr{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}@media(max-width:560px){.fr{grid-template-columns:1fr}}.fr.f1{grid-template-columns:1fr}
 .fl label{display:block;font:500 10px var(--fb);color:var(--t2);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px}.fl input,.fl select,.fl textarea{width:100%;padding:8px 10px;border:1.5px solid var(--bd);border-radius:var(--rs);font:400 13px var(--fb);color:var(--t);background:var(--bg);outline:0;transition:.2s}.fl input:focus,.fl select:focus{border-color:var(--g)}.fl select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 5 5-5' stroke='%237A7167' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
 .rq{color:var(--dn);font-size:8px}.err{border-color:var(--dn)!important;background:var(--db)!important}
@@ -36,13 +190,116 @@
 .sw{position:relative;border:2px dashed var(--bd);border-radius:var(--r);background:#fff;overflow:hidden;touch-action:none}.sw.act{border-color:var(--g);border-style:solid}.sw canvas{display:block;width:100%;height:140px;cursor:crosshair;touch-action:none}.sp{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font:italic 300 13px var(--fd);color:#bbb;pointer-events:none;transition:.3s}
 .pg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}@media(max-width:480px){.pg{grid-template-columns:1fr}}.pb{border:2px dashed var(--bd);border-radius:var(--r);min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;position:relative;overflow:hidden;background:var(--bg);cursor:pointer;transition:.2s}.pb:hover{border-color:var(--g)}.pb.hp{border-style:solid;border-color:var(--g2)}.pb img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}.pb .pl{font:500 10px var(--fb);color:var(--t2);text-transform:uppercase;z-index:1;background:rgba(255,255,255,.85);padding:2px 8px;border-radius:12px}.pb .pr{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:var(--dn);color:#fff;border:0;font:600 11px var(--fb);cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center}.pb input[type=file]{display:none}
 .pcmp{margin-top:8px;display:none}.pcmp.vis{display:block}.pcmpg{display:grid;grid-template-columns:1fr 1fr;gap:2px;border-radius:var(--r);overflow:hidden}.pcmpg img{width:100%;aspect-ratio:1;object-fit:cover;cursor:pointer}.pcmpl{display:grid;grid-template-columns:1fr 1fr;gap:2px;margin-top:1px;text-align:center;font:500 9px var(--fb);color:var(--t2);text-transform:uppercase}
-.b{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:9px 18px;border:none;border-radius:40px;font:600 11px var(--fb);cursor:pointer;transition:.2s;text-decoration:none;white-space:nowrap}.b1{background:var(--g);color:#fff}.b1:hover{background:var(--t)}.b2{background:var(--bg2);color:var(--t);border:1.5px solid var(--bd)}.b2:hover{background:var(--g3)}.bd{background:var(--db);color:var(--dn);border:1.5px solid var(--dn)}.bd:hover{background:var(--dn);color:#fff}.bs{background:var(--sc);color:#fff}.bs:hover{background:#2E7A50}.bw{background:#25D366;color:#fff}.bsm{padding:5px 10px;font-size:10px}.bbl{width:100%}.brow{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.b:disabled{opacity:.4;cursor:not-allowed}
+/* Premium przyciski — złoty gradient na primary, smooth transitions */
+.b{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:10px 20px;
+  border:none;
+  border-radius:40px;
+  font:600 11px var(--fb);
+  letter-spacing:.3px;
+  cursor:pointer;
+  transition:all .25s ease;
+  text-decoration:none;
+  white-space:nowrap;
+  position:relative;
+  overflow:hidden;
+}
+.b1{
+  background:var(--logoGrad);
+  color:#fff;
+  box-shadow:0 2px 8px rgba(184,150,90,.25);
+}
+.b1:hover{
+  background:linear-gradient(135deg,#C8A968,#A88547,#7A5F32);
+  transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(184,150,90,.4);
+}
+.b2{
+  background:var(--c);
+  color:var(--t);
+  border:1.5px solid var(--bd);
+}
+.b2:hover{
+  background:var(--g3);
+  border-color:var(--g2);
+}
+.bd{
+  background:var(--db);
+  color:var(--dn);
+  border:1.5px solid var(--dn);
+}
+.bd:hover{background:var(--dn);color:#fff}
+.bs{
+  background:var(--sc);
+  color:#fff;
+  box-shadow:0 2px 8px rgba(61,122,86,.25);
+}
+.bs:hover{
+  background:#2E6442;
+  transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(61,122,86,.4);
+}
+.bw{background:#25D366;color:#fff}
+.bw:hover{background:#1FB058}
+.bsm{padding:6px 12px;font-size:10px}
+.bbl{width:100%}
+.brow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.b:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.b:disabled:hover{transform:none;box-shadow:none}
 .bo{background:var(--wn);color:#fff}.bo:hover{background:#b07d18}
 .bcall{background:#2196F3;color:#fff}.bcall:hover{background:#1976D2}
 /* Calendar */
-.cal-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.cal-hd h3{font:600 15px var(--fd)}.cal-nav{display:flex;gap:4px}
+.cal-hd{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:14px;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.cal-hd h3{
+  font:700 18px var(--fd);
+  color:var(--gd);
+  letter-spacing:.3px;
+}
+.cal-nav{display:flex;gap:4px}
 .cal-grid{display:grid;grid-template-columns:60px repeat(7,1fr);gap:1px;background:var(--bd);border-radius:var(--r);overflow:hidden;font:400 10px var(--fb)}
-.cal-hdr{background:var(--t);color:#fff;padding:6px 4px;text-align:center;font:600 10px var(--fb)}.cal-time{background:var(--bg2);padding:4px;text-align:right;font:500 9px var(--fb);color:var(--t2)}
+.cal-hdr{
+  background:linear-gradient(180deg,#1A1614,#2A2520);
+  color:#fff;
+  padding:8px 4px;
+  text-align:center;
+  font:600 10px var(--fb);
+  letter-spacing:.4px;
+  border-bottom:1px solid var(--g);
+}
+.cal-hdr.today{
+  background:var(--logoGrad);
+  color:#fff;
+  font-weight:700;
+  position:relative;
+}
+.cal-hdr.today::after{
+  content:"DZIŚ";
+  position:absolute;
+  top:1px;right:3px;
+  font:700 7px var(--fb);
+  letter-spacing:.5px;
+  background:rgba(0,0,0,.25);
+  padding:1px 4px;
+  border-radius:6px;
+}
+.cal-time{
+  background:var(--bg2);
+  padding:4px;
+  text-align:right;
+  font:500 9px var(--fb);
+  color:var(--t2);
+}
 .cal-slot{background:#fff;padding:3px;min-height:28px;cursor:pointer;transition:.15s;position:relative}.cal-slot:hover{background:var(--g3)}.cal-slot.off{background:var(--bg2);cursor:default}.cal-slot.off:hover{background:var(--bg2)}.cal-slot.booked{background:var(--g3);cursor:default}
 .cal-ev{background:var(--g);color:#fff;padding:2px 4px;border-radius:3px;font:500 8px var(--fb);line-height:1.3;overflow:hidden}
 .cal-ev .ce-name{font:600 8px var(--fb);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -285,7 +542,39 @@ body.kiosk-mode .kiosk-hide-inside{display:none!important}
     <button class="b bsm" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);padding:4px 8px;min-width:0" onclick="hideSyncBanner()">✕</button>
   </div>
 </div>
-<div class="hdr"><h1>Gabinet Kosmetologiczny Magda Mączyńska</h1><p>ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.12</span></p></div>
+<div class="hdr">
+  <div class="hdr-monogram" aria-hidden="true">
+    <!-- Monogram MM — inline SVG inspirowany logo Gabinetu Magda Mączyńska
+         (dwa nakładające się wąskie M w złotym gradiencie z ozdobnymi flourishami).
+         Skalowalne, lekkie (~2KB), jakość zachowana w każdym rozmiarze. -->
+    <svg viewBox="0 0 240 140" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#D4B782"/>
+          <stop offset="50%" stop-color="#B8965A"/>
+          <stop offset="100%" stop-color="#8C6F3D"/>
+        </linearGradient>
+      </defs>
+      <g fill="url(#goldGrad)" stroke="url(#goldGrad)" stroke-width="1.5" stroke-linejoin="round">
+        <!-- LEWE M — pionowe smukłe linie z górnym łukiem -->
+        <path d="M 50 120 Q 50 50 65 35 Q 75 28 80 38 L 80 115 Q 78 122 75 121 Q 72 120 72 115 L 72 50 Q 70 45 68 50 L 60 75 Q 58 78 56 75 L 50 60 Q 48 55 50 50 L 50 120 Z" opacity="0.95"/>
+        <!-- ŚRODKOWE pionowe łączące -->
+        <path d="M 110 35 Q 115 28 120 35 Q 125 50 125 115 Q 124 122 120 121 Q 116 120 116 115 L 116 60 Q 115 50 112 55 L 110 65 Z" opacity="0.95"/>
+        <!-- PRAWE M — lustrzane odbicie -->
+        <path d="M 190 120 Q 190 50 175 35 Q 165 28 160 38 L 160 115 Q 162 122 165 121 Q 168 120 168 115 L 168 50 Q 170 45 172 50 L 180 75 Q 182 78 184 75 L 190 60 Q 192 55 190 50 L 190 120 Z" opacity="0.95"/>
+        <!-- Górne ozdobne flourishe -->
+        <path d="M 65 35 Q 80 22 95 30" fill="none" stroke-width="2.5"/>
+        <path d="M 145 30 Q 160 22 175 35" fill="none" stroke-width="2.5"/>
+        <!-- Dolne ozdobne zawijasy -->
+        <path d="M 50 120 Q 35 128 30 120 Q 28 116 35 117" fill="none" stroke-width="2"/>
+        <path d="M 190 120 Q 205 128 210 120 Q 212 116 205 117" fill="none" stroke-width="2"/>
+      </g>
+    </svg>
+  </div>
+  <h1>Gabinet Kosmetologiczny<br><span class="hdr-name">Magda Mączyńska</span></h1>
+  <p class="hdr-tag"><em>Profesjonalne zabiegi na ciało i twarz</em></p>
+  <p class="hdr-info">ul. Okrąg 46, 87-600 Lipno · tel. 503 672 015 · <span style="font:300 9px var(--fb);color:var(--t2);opacity:.6">v1.2.13</span></p>
+</div>
 <div class="wrap">
 
 <div id="vConsent" class="vw on">
@@ -2921,6 +3210,18 @@ function saveToDB(data){return new Promise(resolve=>{const tx=db.transaction(["c
 // ===== CALENDAR (15-min) =====
 const HRS={1:[8,18],2:[8,18],3:[8,18],4:[8,18],5:[8,18],6:[9,15],0:null};
 const DNM=["Nd","Pn","Wt","Śr","Cz","Pt","Sb"];
+// FIX v1.2.13: Konwersja Date → "YYYY-MM-DD" w STREFIE LOKALNEJ.
+// Wcześniej `d.toISOString().substring(0,10)` używał UTC — w Polsce w czasie letniem
+// daty mogą być przesunięte o 1 dzień (np. 5.05 lokalnie = 4.05 UTC po 22:00). To powodowało
+// błędne podświetlanie "dzisiejszego" dnia w kalendarzu. Tutaj zawsze lokalna strefa czasowa.
+function toLocalISO(d){
+  const dt=(d instanceof Date)?d:new Date(d);
+  const y=dt.getFullYear();
+  const m=String(dt.getMonth()+1).padStart(2,"0");
+  const day=String(dt.getDate()).padStart(2,"0");
+  return y+"-"+m+"-"+day;
+}
+function todayLocalISO(){return toLocalISO(new Date());}
 function weekStart(d){const r=new Date(d);const dy=r.getDay();r.setDate(r.getDate()-(dy===0?6:dy-1));r.setHours(0,0,0,0);return r;}
 
 let _calView="week"; // "week" | "month"
@@ -2960,15 +3261,17 @@ async function _renderCalWeek(appts,cls,consByClient){
   const ws=weekStart(calDate);const days=[];for(let i=0;i<7;i++){const d=new Date(ws);d.setDate(d.getDate()+i);days.push(d);}
   document.getElementById("calTitle").textContent=ws.toLocaleDateString("pl-PL",{day:"numeric",month:"short"})+" – "+days[6].toLocaleDateString("pl-PL",{day:"numeric",month:"short",year:"numeric"});
   let g='<div class="cal-grid"><div class="cal-hdr"></div>';
+  const todayIso=todayLocalISO();
   days.forEach(d=>{
-    const isToday=d.toISOString().substring(0,10)===new Date().toISOString().substring(0,10);
-    g+='<div class="cal-hdr"'+(isToday?' style="background:var(--g);border-bottom:2px solid var(--g2)"':'')+'>'+DNM[d.getDay()]+'<br>'+d.getDate()+'</div>';
+    // FIX v1.2.13: Lokalne YYYY-MM-DD zamiast UTC toISOString
+    const isToday=toLocalISO(d)===todayIso;
+    g+='<div class="cal-hdr'+(isToday?' today':'')+'">'+DNM[d.getDay()]+'<br>'+d.getDate()+'</div>';
   });
   for(let h=8;h<18;h++){for(let m=0;m<60;m+=15){
     const tl=(h<10?"0":"")+h+":"+(m<10?"0":"")+m;
     g+='<div class="cal-time">'+tl+'</div>';
     days.forEach(d=>{
-      const dw=d.getDay();const hrs=HRS[dw];const ds=d.toISOString().split("T")[0];
+      const dw=d.getDay();const hrs=HRS[dw];const ds=toLocalISO(d);
       if(!hrs||h<hrs[0]||h>=hrs[1]){g+='<div class="cal-slot off"></div>';return;}
       const occupied=appts.find(a=>{if(a.date!==ds)return false;const aH=parseInt(a.time.split(":")[0]),aM=parseInt(a.time.split(":")[1]);const aStart=aH*60+aM;const aEnd=aStart+(a.duration||60);const slotMin=h*60+m;return slotMin>=aStart&&slotMin<aEnd;});
       if(occupied){
@@ -3012,7 +3315,7 @@ async function _renderCalWeek(appts,cls,consByClient){
 function _scrollCalToNow(){
   if(_calView!=="week")return;
   const now=new Date();
-  const todayIso=now.toISOString().substring(0,10);
+  const todayIso=todayLocalISO();
   // Tylko jeśli aktualnie wyświetlany tydzień zawiera dziś
   const ws=weekStart(calDate);
   const we=new Date(ws);we.setDate(we.getDate()+6);
@@ -3042,7 +3345,8 @@ async function _renderCalMonth(appts,cls,consByClient){
   const y=calDate.getFullYear(),mo=calDate.getMonth();
   const firstDay=new Date(y,mo,1);
   const lastDay=new Date(y,mo+1,0);
-  const todayStr=new Date().toISOString().substring(0,10);
+  // FIX v1.2.13: lokalne YYYY-MM-DD zamiast UTC
+  const todayStr=todayLocalISO();
   document.getElementById("calTitle").textContent=firstDay.toLocaleDateString("pl-PL",{month:"long",year:"numeric"});
   const leadBlank=(firstDay.getDay()||7)-1;
   let g='<div class="cal-month-grid">';
@@ -3050,7 +3354,7 @@ async function _renderCalMonth(appts,cls,consByClient){
   for(let i=0;i<leadBlank;i++)g+='<div class="cal-month-cell off"></div>';
   for(let day=1;day<=lastDay.getDate();day++){
     const dd=new Date(y,mo,day);const dw=dd.getDay();
-    const ds=dd.toISOString().substring(0,10);
+    const ds=toLocalISO(dd);
     const hrs=HRS[dw];const isOff=!hrs;const isToday=ds===todayStr;
     const dayAppts=appts.filter(a=>a.date===ds).sort((a,b)=>a.time.localeCompare(b.time));
     g+='<div class="cal-month-cell'+(isOff?" off":"")+(isToday?" today":"")+'" onclick="calGoDay(\''+ds+'\')">';
