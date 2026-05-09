@@ -1,7 +1,7 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.20  |  2026-04-26
- *  Zmiany v1.2.20 (Sprzedaż + UX):
+ *  Wersja: 1.2.21  |  2026-04-26
+ *  Zmiany v1.2.21 (Sprzedaż + UX):
  *   • NOWY widok 🛍 Sprzedaż produktów (POS) — oddzielny od panelu zabiegowego
  *     - Wybór klienta z bazy (autocomplete) lub sprzedaż bez przypisania
  *     - Picker produktów retail z magazynu (kategorie, wyszukiwarka, stan)
@@ -22,7 +22,7 @@
 
 "use strict";
 
-const CACHE_VERSION = "v1.2.20";
+const CACHE_VERSION = "v1.2.21";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
@@ -175,7 +175,7 @@ self.addEventListener("fetch", (event) => {
 async function handleSameOrigin(req) {
   const cache = await caches.open(CACHE);
 
-  // FIX v1.2.20: HTML i index.html — NETWORK-FIRST z fallbackiem do cache.
+  // FIX v1.2.21: HTML i index.html — NETWORK-FIRST z fallbackiem do cache.
   // Powód: zwykły cache-first oznaczał że po deployment nowej wersji aplikacja
   // pokazywała stary index.html aż do następnego activate (czasem dni). Teraz:
   //   • online — zawsze świeży HTML z sieci, w tle aktualizujemy cache
