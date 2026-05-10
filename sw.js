@@ -1,7 +1,7 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.22  |  2026-04-26
- *  Zmiany v1.2.22 (Sprzedaż + UX):
+ *  Wersja: 1.2.23  |  2026-04-26
+ *  Zmiany v1.2.23 (Sprzedaż + UX):
  *   • NOWY widok 🛍 Sprzedaż produktów (POS) — oddzielny od panelu zabiegowego
  *     - Wybór klienta z bazy (autocomplete) lub sprzedaż bez przypisania
  *     - Picker produktów retail z magazynu (kategorie, wyszukiwarka, stan)
@@ -22,7 +22,7 @@
 
 "use strict";
 
-const CACHE_VERSION = "v1.2.22";
+const CACHE_VERSION = "v1.2.23";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
@@ -32,8 +32,13 @@ const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./icon.svg"
-  // icon-192.png / icon-512.png dodaj gdy wygenerujesz pliki PNG
+  "./fonts.js",
+  "./Logo.gif",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./icon-1024.png",
+  "./apple-touch-icon.png",
+  "./favicon-32.png"
 ];
 
 // ------------------------------------------------------------
@@ -175,7 +180,7 @@ self.addEventListener("fetch", (event) => {
 async function handleSameOrigin(req) {
   const cache = await caches.open(CACHE);
 
-  // FIX v1.2.22: HTML i index.html — NETWORK-FIRST z fallbackiem do cache.
+  // FIX v1.2.23: HTML i index.html — NETWORK-FIRST z fallbackiem do cache.
   // Powód: zwykły cache-first oznaczał że po deployment nowej wersji aplikacja
   // pokazywała stary index.html aż do następnego activate (czasem dni). Teraz:
   //   • online — zawsze świeży HTML z sieci, w tle aktualizujemy cache
