@@ -1,6 +1,6 @@
 /* ============================================================
  *  Gabinet MM — Service Worker
- *  Wersja: 1.2.29  |  2026-04-26
+ *  Wersja: 1.2.30  |  2026-05-12
  *  Zmiany v1.2.29 (Sprzedaż + UX):
  *   • NOWY widok 🛍 Sprzedaż produktów (POS) — oddzielny od panelu zabiegowego
  *     - Wybór klienta z bazy (autocomplete) lub sprzedaż bez przypisania
@@ -22,7 +22,7 @@
 
 "use strict";
 
-const CACHE_VERSION = "v1.2.29";
+const CACHE_VERSION = "v1.2.30";
 const CACHE = "gabinet-mm-" + CACHE_VERSION;
 
 // ------------------------------------------------------------
